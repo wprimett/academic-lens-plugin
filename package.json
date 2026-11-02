@@ -1,6 +1,6 @@
 {
   "name": "academic-lens-zotero",
-  "version": "1.1.5",
+  "version": "1.1.8",
   "description": "Academic Lens: Local AI Research Assistant for Zotero powered by Qwen",
   "type": "module",
   "scripts": {

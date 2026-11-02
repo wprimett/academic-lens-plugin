@@ -182,17 +182,10 @@ var { Zotero } = (typeof ChromeUtils !== "undefined" && ChromeUtils.importESModu
     a.maxTokens = newTok;
     a.saveSettings();
 
-    // Sync any open sidebar UI
+    // Trigger dynamic sidebar update and endpoint status re-check
     try {
-      if (a.windows) {
-        for (const [win] of a.windows) {
-          try {
-            var epEl = win.document.getElementById("al-input-endpoint");
-            var mdEl = win.document.getElementById("al-input-model");
-            if (epEl) epEl.value = newEp;
-            if (mdEl) mdEl.value = newModel;
-          } catch (_) {}
-        }
+      if (typeof a.updateAllSidebars === "function") {
+        a.updateAllSidebars();
       }
     } catch (_) {}
 
@@ -207,12 +200,15 @@ var { Zotero } = (typeof ChromeUtils !== "undefined" && ChromeUtils.importESModu
   function reset() {
     var a = al();
     if (!a) return;
-    setVal("s-endpoint", a.DEFAULT_ENDPOINT || "http://77.42.92.200:18181/");
-    setVal("s-model", a.DEFAULT_MODEL || "Llama-3.2-3B-Instruct-Q4_K_M");
-    var t = a.DEFAULT_MAX_TOKENS || 800;
-    setVal("s-tokens-range", t);
-    setVal("s-tokens-num", t);
-    syncTokenDisplay(t);
+    var defEp = a.DEFAULT_ENDPOINT || "http://77.42.92.200:18181/";
+    var defModel = a.DEFAULT_MODEL || "Llama-3.2-3B-Instruct-Q4_K_M";
+    var defTok = a.DEFAULT_MAX_TOKENS || 800;
+
+    setVal("s-endpoint", defEp);
+    setVal("s-model", defModel);
+    setVal("s-tokens-range", defTok);
+    setVal("s-tokens-num", defTok);
+    syncTokenDisplay(defTok);
 
     ["s-endpoint", "s-model"].forEach(function(id) {
       var e = el(id);
@@ -221,7 +217,19 @@ var { Zotero } = (typeof ChromeUtils !== "undefined" && ChromeUtils.importESModu
     ["s-endpoint-status", "s-model-status", "s-tokens-status"].forEach(function(id) {
       status(id, "", "");
     });
-    status("s-save-status", "info", "Reset to defaults — click Save to apply.");
+
+    a.endpoint = defEp;
+    a.modelName = defModel;
+    a.maxTokens = defTok;
+    a.saveSettings();
+
+    try {
+      if (typeof a.updateAllSidebars === "function") {
+        a.updateAllSidebars();
+      }
+    } catch (_) {}
+
+    status("s-save-status", "info", "Reset to defaults and applied.");
   }
 
   window.addEventListener("load", function () {

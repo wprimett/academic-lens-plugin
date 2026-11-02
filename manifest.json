@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Academic Lens",
-  "version": "1.1.5",
+  "version": "1.1.8",
   "description": "Local AI research assistant for Zotero powered by Qwen",
   "author": "Academic Lens Team",
   "icons": {

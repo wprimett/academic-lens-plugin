@@ -26,20 +26,24 @@ Zotero.AcademicLens = {
   DEFAULT_MODEL: "Llama-3.2-3B-Instruct-Q4_K_M",
   FALLBACK_MODEL: "Qwen3.5-4B-Q4_K_S",
   DEFAULT_MAX_TOKENS: 800,
+  DEFAULT_MAX_CONTEXT_CHARS: 3200,
 
   endpoint: "http://77.42.92.200:18181/",
   modelName: "Llama-3.2-3B-Instruct-Q4_K_M",
   maxTokens: 800,
+  abstractOnly: false,
 
   // State
   rootURI: null,
-  windows: new Map(),      // win → { isOpen: boolean }
-  selectedDocuments: [],   // [{ id, title, authors, year, abstract, url, display }]
+  windows: new Map(),      // win → { isOpen: boolean, isMaximized: boolean }
+  selectedDocuments: [],   // [{ id, title, authors, year, abstract, url, display, hasPdf, isExtracting, fullText, txtPath }]
   chatHistory: [],         // [{ role, content }]
   abortController: null,
   isGenerating: false,
   stylesheetRegistered: false,
   connectionEnabled: true,
+  _prefObservers: [],
+  _settingsWindow: null,
 
   /* ============================================================
      Lifecycle
@@ -51,11 +55,12 @@ Zotero.AcademicLens = {
     this.registerGlobalStylesheet();
     this.registerPreferencesPane(id, rootURI);
     this.registerTabObserver();
+    this.registerPrefObservers();
     Zotero.debug("[AcademicLens] Addon started. Endpoint: " + this.endpoint);
   },
 
-
   async onShutdown() {
+    this.unregisterPrefObservers();
     this.unregisterTabObserver();
     this.unregisterGlobalStylesheet();
     for (const [win] of this.windows) {
@@ -131,7 +136,7 @@ Zotero.AcademicLens = {
 
   initWindowUI(win) {
     if (this.windows.has(win)) return;
-    this.windows.set(win, { isOpen: false });
+    this.windows.set(win, { isOpen: false, isMaximized: false });
 
     Zotero.debug("[AcademicLens] Initializing window UI...");
 
@@ -162,6 +167,7 @@ Zotero.AcademicLens = {
   cleanupWindow(win) {
     if (!win || !win.document) return;
     try {
+      this.applyMaximizeState(win, false);
       this.unobserveItemPane(win);
       win.document.getElementById("zotero-academic-lens-tb-toggle")?.remove();
       win.document.getElementById("menu-academic-lens")?.remove();
@@ -324,16 +330,23 @@ Zotero.AcademicLens = {
    * sidebar HTML goes into that div so Gecko parses it in the HTML namespace
    * and applies normal flex box / block layout.
    */
+  getMaximizeIcon(isMaximized = false) {
+    // return isMaximized ? "⤡ Restore" : "⤢ Maximise";
+    return isMaximized ? "⤡" : "⤢";
+  },
+
   getSidebarHTML() {
     return `
-      <div class="al-header">
-        <div class="al-title-area">
+      <div class="al-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#22222a;border-bottom:1px solid #33333f;flex-shrink:0;">
+        <div class="al-title-area" style="display:flex;align-items:center;gap:8px;min-width:0;">
           <img class="al-logo" src="chrome://academic-lens/content/icons/icon.png" alt="Logo" />
-          <h3 class="al-title">Academic Lens</h3>
+          <h3 class="al-title" style="margin:0;white-space:nowrap;">Academic Lens</h3>
         </div>
         <div class="al-header-actions" style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
-          <button id="al-btn-close" title="Close Sidebar" aria-label="Close"
-            style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;min-width:28px;min-height:28px;padding:4px;background:none;border:none;border-radius:6px;color:#888;font-size:16px;cursor:pointer;-moz-appearance:none;box-sizing:border-box;">✕</button>
+          <span id="al-btn-maximize" class="al-header-btn" role="button" tabindex="0" title="Maximise Panel" aria-label="Maximise Panel" aria-pressed="false"
+            style="display:inline-flex;align-items:center;justify-content:center;gap:4px;height:26px;min-height:26px;padding:0 10px;background:#282834;border:1px solid #6c5ce7;border-radius:6px;color:#e0e0f0;font-size:11.5px;font-weight:600;cursor:pointer;user-select:none;line-height:1;white-space:nowrap;flex-shrink:0;box-sizing:border-box;">${this.getMaximizeIcon(false)}</span>
+          <span id="al-btn-close" class="al-header-btn" role="button" tabindex="0" title="Close Sidebar" aria-label="Close"
+            style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;min-width:26px;min-height:26px;padding:0;background:#282834;border:1px solid #4a4a5e;border-radius:6px;color:#e0e0f0;font-size:14px;font-weight:bold;cursor:pointer;user-select:none;line-height:1;flex-shrink:0;box-sizing:border-box;">✕</span>
         </div>
       </div>
 
@@ -343,6 +356,7 @@ Zotero.AcademicLens = {
           <div class="al-config-title">
             <span class="al-status-dot checking" id="al-cfg-status-dot" title="Checking status…"></span>
             <span>Endpoint Status:</span>
+            <span class="al-cfg-status-text checking" id="al-cfg-status-text">Checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
             <button class="al-btn-toggle-conn disconnect" id="al-btn-toggle-conn" title="Toggle connection status">Disconnect</button>
@@ -379,30 +393,44 @@ Zotero.AcademicLens = {
       <div class="al-context-section">
         <div class="al-context-header">
           <span class="al-context-title">Selected Sources (<span id="al-doc-count">0</span>)</span>
-          <button class="al-btn al-btn-secondary al-btn-sm" id="al-btn-add-selected">+ Add Selected</button>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span class="al-btn-dev-toggle ${this.abstractOnly ? "active" : ""}" id="al-btn-abstract-only"
+              role="button" tabindex="0"
+              aria-pressed="${this.abstractOnly ? "true" : "false"}"
+              style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;border:1px solid ${this.abstractOnly ? "rgba(250,173,20,0.5)" : "rgba(82,214,138,0.4)"};background:${this.abstractOnly ? "rgba(250,173,20,0.16)" : "rgba(82,214,138,0.14)"};color:${this.abstractOnly ? "#ffc53d" : "#52d68a"};"
+              title="Developer toggle: when active, queries only use item abstracts and ignore extracted PDF text">${this.abstractOnly ? "🧪 Abstract-Only: ON" : "📄 Mode: PDF + Abstract"}</span>
+            <button class="al-btn al-btn-secondary al-btn-xs" id="al-btn-clear-sources" title="Clear all selected sources">✕ Clear</button>
+            <button class="al-btn al-btn-secondary al-btn-sm" id="al-btn-add-selected">+ Add Selected</button>
+          </div>
         </div>
         <div class="al-drop-zone" id="al-drop-zone">
           <span class="al-drop-icon">📄</span>
-          Drag articles from library here
+          Drag articles from library here (auto-detects PDF &amp; converts to .txt)
         </div>
         <div class="al-doc-list" id="al-doc-list"></div>
       </div>
 
       <div class="al-messages-area" id="al-messages-area">
         <div class="al-message assistant">
-          <div class="al-msg-header">Academic Lens</div>
-          <div class="al-msg-content">Welcome to <b>Academic Lens</b>. Drag one or more papers from your library here, then ask a research question below.</div>
+          <div class="al-msg-header">
+            <span>Academic Lens</span>
+          </div>
+          <div class="al-msg-content">Welcome to <b>Academic Lens</b>. Drag or select papers from your library to query specific sources, or simply type a keyword or question below with no papers selected to automatically find and analyze <b>2–5 matching papers</b> from your library.</div>
         </div>
+      </div>
 
-        <div class="al-quick-prompts">
-          <button class="al-quick-btn" data-prompt="Summarize the key findings of these papers.">💡 Summarize findings</button>
-          <button class="al-quick-btn" data-prompt="Compare the methodologies used across these papers.">🔬 Compare methods</button>
-          <button class="al-quick-btn" data-prompt="What are the main contributions of these papers?">❓ Key contributions</button>
+      <!-- ── Persistent Quick Prompts Toolbar ────────────────────── -->
+      <div class="al-quick-prompts" id="al-quick-prompts" style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:#1e1e24;border-top:1px solid #33333e;flex-shrink:0;">
+        <div class="al-quick-title" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#8d77ca;user-select:none;">Quick Prompts:</div>
+        <div class="al-quick-list" style="display:flex;flex-wrap:wrap;gap:6px;width:100%;">
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Summarize the key findings of these papers." style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">💡 Summarize findings</span>
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Compare the methodologies used across these papers." style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">🔬 Compare methods</span>
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="What are the main contributions of these papers?" style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">❓ Key contributions</span>
         </div>
       </div>
 
       <div class="al-composer-area">
-        <textarea class="al-textarea" id="al-input-query" placeholder="Ask a question about the selected papers… (Enter to send, Shift+Enter for new line)" rows="2"></textarea>
+        <textarea class="al-textarea" id="al-input-query" placeholder="Ask about selected papers, or enter keywords / a question to search for 2–5 papers… (Enter to send)" rows="2"></textarea>
         <div class="al-composer-actions">
           <div class="al-action-group">
             <button class="al-btn al-btn-secondary" id="al-btn-clear-chat">Clear</button>
@@ -487,8 +515,33 @@ Zotero.AcademicLens = {
   ============================================================ */
 
   bindEvents(win, root) {
-    // Header close
-    root.querySelector("#al-btn-close")?.addEventListener("click", () => this.toggleSidebar(win, false));
+    // Header maximise & close
+    const maxBtn = root.querySelector("#al-btn-maximize");
+    const closeBtn = root.querySelector("#al-btn-close");
+
+    maxBtn?.addEventListener("click", () => this.toggleMaximize(win));
+    maxBtn?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.toggleMaximize(win);
+      }
+    });
+
+    closeBtn?.addEventListener("click", () => this.toggleSidebar(win, false));
+    closeBtn?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.toggleSidebar(win, false);
+      }
+    });
+
+    root.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !this.isGenerating && this.windows.get(win)?.isMaximized) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleMaximize(win, false);
+      }
+    });
 
     // Inline Model and Endpoint input sync
     const modelInput = root.querySelector("#al-input-model");
@@ -567,7 +620,22 @@ Zotero.AcademicLens = {
       }
     }, 250);
 
+    // Developer toggle: Abstract-Only vs PDF + Abstract
+    const devToggleBtn = root.querySelector("#al-btn-abstract-only");
+    devToggleBtn?.addEventListener("click", () => {
+      this.toggleAbstractOnly(win);
+    });
+    devToggleBtn?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        this.toggleAbstractOnly(win);
+      }
+    });
 
+    // Clear selected sources
+    root.querySelector("#al-btn-clear-sources")?.addEventListener("click", () => {
+      this.clearSelectedDocuments(win);
+    });
 
     // Add selected library items
     root.querySelector("#al-btn-add-selected")?.addEventListener("click", async () => {
@@ -585,11 +653,18 @@ Zotero.AcademicLens = {
 
     // Quick-prompt chips
     root.querySelectorAll(".al-quick-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
+      const applyPrompt = () => {
         const prompt = btn.getAttribute("data-prompt");
         if (!prompt) return;
         const ta = root.querySelector("#al-input-query");
         if (ta) { ta.value = prompt; ta.focus(); }
+      };
+      btn.addEventListener("click", applyPrompt);
+      btn.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          applyPrompt();
+        }
       });
     });
 
@@ -606,10 +681,19 @@ Zotero.AcademicLens = {
       }
     });
 
+    sendBtn?.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
+        if (this.isGenerating) {
+          e.preventDefault();
+          this.abortGeneration(win);
+        }
+      }
+    });
+
     textarea?.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) {
         if (this.isGenerating) {
-          const hasSelection = (textarea.selectionStart !== textarea.selectionEnd) || !!win.getSelection()?.toString();
+          const hasSelection = (textarea.selectionStart !== textarea.selectionEnd);
           if (!hasSelection) {
             e.preventDefault();
             this.abortGeneration(win);
@@ -621,16 +705,6 @@ Zotero.AcademicLens = {
         e.preventDefault();
         if (!this.isGenerating) {
           this.handleSend(win);
-        }
-      }
-    });
-
-    root.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C") && this.isGenerating) {
-        const hasSelection = (textarea && textarea.selectionStart !== textarea.selectionEnd) || !!win.getSelection()?.toString();
-        if (!hasSelection) {
-          e.preventDefault();
-          this.abortGeneration(win);
         }
       }
     });
@@ -763,7 +837,8 @@ Zotero.AcademicLens = {
       (!domItemPane && domContextPane)
     );
 
-    const wasOpen    = Boolean(this.windows.get(win)?.isOpen);
+    const prevWinState = this.windows.get(win) || { isOpen: false, isMaximized: false };
+    const wasOpen    = Boolean(prevWinState.isOpen);
     const shouldOpen = forceState !== null ? forceState : !wasOpen;
 
     Zotero.debug(`[AcademicLens] toggleSidebar: shouldOpen=${shouldOpen}, isReaderTab=${isReaderTab}, wasOpen=${wasOpen}`);
@@ -802,17 +877,138 @@ Zotero.AcademicLens = {
 
       tbBtn?.setAttribute("aria-pressed", "true");
       tbBtn?.setAttribute("selected", "true");
-      this.windows.set(win, { isOpen: true });
+      this.windows.set(win, { isOpen: true, isMaximized: Boolean(prevWinState.isMaximized) });
+      this.applyMaximizeState(win, Boolean(prevWinState.isMaximized));
       this.observeItemPane(win);
     } else {
+      this.applyMaximizeState(win, false);
       hideIn(domItemPane, alPaneLib);
       hideIn(domContextPane, alPaneRdr);
 
       tbBtn?.setAttribute("aria-pressed", "false");
       tbBtn?.removeAttribute("selected");
-      this.windows.set(win, { isOpen: false });
+      this.windows.set(win, { isOpen: false, isMaximized: false });
       this.unobserveItemPane(win);
     }
+  },
+
+  /* ============================================================
+     Maximise / Restore Panel (Antigravity Code Viewer Style)
+  ============================================================ */
+
+  toggleMaximize(win, forceState = null) {
+    if (!win || win.closed || !win.document) return;
+    const winState = this.windows.get(win) || { isOpen: true, isMaximized: false };
+    const nextMaximized = forceState !== null ? Boolean(forceState) : !winState.isMaximized;
+
+    this.windows.set(win, { ...winState, isMaximized: nextMaximized });
+    this.applyMaximizeState(win, nextMaximized);
+    Zotero.debug(`[AcademicLens] Panel maximised: ${nextMaximized}`);
+  },
+
+  applyMaximizeState(win, isMaximized) {
+    if (!win || win.closed || !win.document) return;
+    const doc = win.document;
+
+    const toolbar = doc.getElementById("zotero-tabs-toolbar") || doc.getElementById("navigator-toolbox");
+    const topOffset = toolbar ? Math.max(0, Math.round(toolbar.getBoundingClientRect().bottom)) : 0;
+
+    const panes = [
+      doc.getElementById("academic-lens-pane-library"),
+      doc.getElementById("academic-lens-pane-reader"),
+    ].filter(Boolean);
+
+    const containers = [
+      doc.getElementById("zotero-item-pane"),
+      doc.getElementById("zotero-context-pane"),
+    ].filter(Boolean);
+
+    // Always restore any container fallback styles first before re-evaluating
+    containers.forEach(container => {
+      container.classList.remove("al-container-maximized");
+      if (container.dataset && container.dataset.alPrevStyle !== undefined) {
+        const prev = container.dataset.alPrevStyle;
+        if (prev) {
+          container.setAttribute("style", prev);
+        } else {
+          container.removeAttribute("style");
+        }
+        delete container.dataset.alPrevStyle;
+      }
+    });
+
+    panes.forEach(pane => {
+      const htmlRoot = pane.querySelector(".al-html-root");
+      const maxBtn   = pane.querySelector("#al-btn-maximize");
+
+      if (isMaximized) {
+        pane.classList.add("al-maximized");
+        htmlRoot?.classList.add("al-maximized");
+
+        pane.style.setProperty("position", "fixed", "important");
+        pane.style.setProperty("top", `${topOffset}px`, "important");
+        pane.style.setProperty("left", "0px", "important");
+        pane.style.setProperty("right", "0px", "important");
+        pane.style.setProperty("bottom", "0px", "important");
+        pane.style.setProperty("width", "100vw", "important");
+        pane.style.setProperty("max-width", "100vw", "important");
+        pane.style.setProperty("height", `calc(100vh - ${topOffset}px)`, "important");
+        pane.style.setProperty("z-index", "99999", "important");
+
+        if (maxBtn) {
+          maxBtn.textContent = this.getMaximizeIcon(true);
+          maxBtn.setAttribute("title", "Restore Panel Size (Esc)");
+          maxBtn.setAttribute("aria-label", "Restore Panel Size");
+          maxBtn.setAttribute("aria-pressed", "true");
+          maxBtn.classList.add("active");
+          maxBtn.style.background = "rgba(141, 119, 202, 0.28)";
+          maxBtn.style.borderColor = "#9b87d6";
+          maxBtn.style.color = "#ffffff";
+        }
+
+        // If an ancestor has `contain` or `transform` that traps fixed positioning,
+        // expand the immediate Zotero pane container as a fallback.
+        const parentContainer = pane.parentElement;
+        if (parentContainer && pane.style.display !== "none") {
+          const rect = pane.getBoundingClientRect();
+          if (win.innerWidth > 0 && rect.width < win.innerWidth * 0.85) {
+            if (parentContainer.dataset && parentContainer.dataset.alPrevStyle === undefined) {
+              parentContainer.dataset.alPrevStyle = parentContainer.getAttribute("style") || "";
+            }
+            parentContainer.classList.add("al-container-maximized");
+            parentContainer.style.setProperty("position", "fixed", "important");
+            parentContainer.style.setProperty("top", `${topOffset}px`, "important");
+            parentContainer.style.setProperty("left", "0px", "important");
+            parentContainer.style.setProperty("right", "0px", "important");
+            parentContainer.style.setProperty("bottom", "0px", "important");
+            parentContainer.style.setProperty("width", "100vw", "important");
+            parentContainer.style.setProperty("max-width", "100vw", "important");
+            parentContainer.style.setProperty("height", `calc(100vh - ${topOffset}px)`, "important");
+            parentContainer.style.setProperty("z-index", "99998", "important");
+          }
+        }
+      } else {
+        pane.classList.remove("al-maximized");
+        htmlRoot?.classList.remove("al-maximized");
+
+        ["position", "top", "left", "right", "bottom", "max-width", "z-index"].forEach(prop => {
+          pane.style.removeProperty(prop);
+        });
+        pane.style.width = "100%";
+        pane.style.height = "100%";
+
+        if (maxBtn) {
+          maxBtn.textContent = this.getMaximizeIcon(false);
+          maxBtn.setAttribute("title", "Maximise Panel");
+          maxBtn.setAttribute("aria-label", "Maximise Panel");
+          maxBtn.setAttribute("aria-pressed", "false");
+          maxBtn.classList.remove("active");
+          maxBtn.style.background = "#282834";
+          maxBtn.style.borderColor = "#6c5ce7";
+          maxBtn.style.color = "#e0e0f0";
+        }
+      }
+    });
   },
 
   /* Re-apply sidebar visibility when the user switches between library and reader tabs */
@@ -844,8 +1040,6 @@ Zotero.AcademicLens = {
      Settings Window (pop-out, Beaver pattern)
   ============================================================ */
 
-  _settingsWindow: null,
-
   openSettingsWindow(win) {
     if (this._settingsWindow && !this._settingsWindow.closed) {
       this._settingsWindow.focus();
@@ -865,6 +1059,7 @@ Zotero.AcademicLens = {
       this._settingsWindow = opened;
       opened.addEventListener("unload", () => {
         this._settingsWindow = null;
+        this.updateAllSidebars();
       }, { once: true });
     }
 
@@ -872,11 +1067,19 @@ Zotero.AcademicLens = {
   },
 
   /* ============================================================
-     Item Ingestion (Abstract & Metadata only)
+     Item Ingestion (Automatic PDF → .txt + Abstract & Metadata)
   ============================================================ */
 
-  async addItemsByIds(ids, win) {
+  toggleAbstractOnly(win = null, forceState = null) {
+    this.abstractOnly = forceState !== null ? Boolean(forceState) : !this.abstractOnly;
+    try {
+      Zotero.Prefs?.set?.("extensions.academic-lens.abstractOnly", Boolean(this.abstractOnly));
+    } catch (_) {}
+    Zotero.debug(`[AcademicLens] Developer Abstract-Only mode: ${this.abstractOnly}`);
+    this.renderDocumentChips(win);
+  },
 
+  async addItemsByIds(ids, win) {
     if (!ids || ids.length === 0) return;
     try {
       const items = await Zotero.Items.getAsync(ids);
@@ -886,30 +1089,541 @@ Zotero.AcademicLens = {
     }
   },
 
+  async buildDocEntryFromItem(rawItem, win) {
+    if (!rawItem) return null;
+
+    let item = rawItem;
+    let directAttachment = null;
+
+    // Support dragging/selecting either a regular parent item OR a child PDF/TXT attachment directly
+    try {
+      if (rawItem.isAttachment && rawItem.isAttachment()) {
+        directAttachment = rawItem;
+        if (rawItem.parentItemID) {
+          const parent = await Zotero.Items.getAsync(rawItem.parentItemID);
+          if (parent && parent.isRegularItem && parent.isRegularItem()) {
+            item = parent;
+          }
+        }
+      }
+    } catch (_) {}
+
+    const isReg = Boolean(item.isRegularItem && item.isRegularItem());
+    const isAtt = Boolean(item.isAttachment && item.isAttachment());
+    if (!isReg && !isAtt) return null;
+
+    const title    = item.getField("title") || directAttachment?.getField?.("title") || "Untitled";
+    const creators = (isReg && item.getCreators) ? (item.getCreators() || []) : [];
+    const firstAuthor = creators.length > 0
+      ? (creators[0].lastName || creators[0].name || "Unknown")
+      : "Unknown";
+    const authors  = creators.map(c => c.lastName || c.name).filter(Boolean).join(", ") || firstAuthor;
+    const rawDate  = (isReg && (item.getField("date") || item.getField("year"))) || "";
+    const yearMatch = String(rawDate).match(/\b(19\d{2}|20\d{2})\b/);
+    const year     = yearMatch ? yearMatch[1] : (rawDate ? String(rawDate).substring(0, 4) : "n.d.");
+    const abstract = isReg ? this.normalizeWs(item.getField("abstractNote") || "") : "";
+    const doi      = isReg ? item.getField("DOI") : "";
+    const url      = item.getField("url") || (doi ? `https://doi.org/${doi}` : "");
+    const display  = isReg ? `${firstAuthor} (${year})` : title;
+
+    const docEntry = {
+      id: item.id,
+      title,
+      firstAuthor,
+      authors,
+      year,
+      abstract,
+      url,
+      display,
+      hasPdf: false,
+      isExtracting: true,
+      fullText: "",
+      txtPath: null,
+      _extractPromise: null,
+    };
+
+    const p = this.extractItemPdfToTxt(item, directAttachment, docEntry, win);
+    docEntry._extractPromise = p;
+    return docEntry;
+  },
+
   async addItems(items, win) {
     const list = Array.isArray(items) ? items : [items];
-    for (const item of list) {
-      if (!item || !item.isRegularItem()) continue;
-      if (this.selectedDocuments.some(d => d.id === item.id)) continue;  // no dups
+    const extractionTasks = [];
 
-      const title    = item.getField("title") || "Untitled";
-      const creators = item.getCreators() || [];
-      const firstAuthor = creators.length > 0
-        ? (creators[0].lastName || creators[0].name || "Unknown")
-        : "Unknown";
-      const authors  = creators.map(c => c.lastName || c.name).filter(Boolean).join(", ") || firstAuthor;
-      const rawDate  = item.getField("date") || item.getField("year") || "";
-      const yearMatch = rawDate.match(/\b(19\d{2}|20\d{2})\b/);
-      const year     = yearMatch ? yearMatch[1] : (rawDate ? rawDate.substring(0, 4) : "n.d.");
-      const abstract = this.normalizeWs(item.getField("abstractNote") || "");
-      const doi      = item.getField("DOI");
-      const url      = item.getField("url") || (doi ? `https://doi.org/${doi}` : "");
-      const display  = `${firstAuthor} (${year})`;
+    for (const rawItem of list) {
+      if (!rawItem) continue;
+      const docEntry = await this.buildDocEntryFromItem(rawItem, win);
+      if (!docEntry) continue;
+      if (this.selectedDocuments.some(d => d.id === docEntry.id)) continue; // no dups
 
-      this.selectedDocuments.push({ id: item.id, title, firstAuthor, authors, year, abstract, url, display });
+      this.selectedDocuments.push(docEntry);
+      if (docEntry._extractPromise) {
+        extractionTasks.push(docEntry._extractPromise);
+      }
     }
 
     this.renderDocumentChips(win);
+    if (extractionTasks.length > 0) {
+      await Promise.allSettled(extractionTasks);
+      this.renderDocumentChips(win);
+    }
+  },
+
+  /**
+   * Searches the user's Zotero library for 2–5 papers matching the prompt's
+   * keywords or research question when no PDFs/sources are manually selected.
+   */
+  async searchLibraryPapers(query, win, minResults = 2, maxResults = 5) {
+    if (!query || !String(query).trim()) return [];
+
+    const stopWords = new Set([
+      "the", "and", "for", "that", "this", "with", "from", "what", "are", "how",
+      "which", "where", "when", "who", "whom", "whose", "why", "does", "did", "can",
+      "could", "would", "should", "will", "was", "were", "been", "being", "have",
+      "has", "had", "into", "onto", "upon", "within", "without", "between", "among",
+      "through", "during", "before", "after", "above", "below", "under", "over",
+      "these", "those", "their", "they", "them", "there", "here", "some", "such",
+      "only", "more", "most", "other", "than", "very", "just", "also", "about",
+      "paper", "papers", "article", "articles", "study", "studies", "research",
+      "find", "search", "show", "list", "give", "tell", "explain", "summarize",
+      "compare", "contrast", "discuss", "describe", "identify", "relate", "related",
+      "relating", "using", "used", "use", "based", "question", "questions", "key",
+      "main", "findings", "finding", "contributions", "contribution"
+    ]);
+
+    const rawClean = String(query)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Extract meaningful search terms
+    let allTokens = rawClean.split(" ").filter(w => w.length >= 2);
+    let keywords = allTokens.filter(w => !stopWords.has(w) && (w.length >= 3 || /^(ai|ml|vr|ar|xr|3d|2d|ui|ux|llm|rag|nlp|hci|iot|gpu|cpu)$/.test(w)));
+    if (keywords.length === 0) {
+      keywords = allTokens.filter(w => w.length >= 2);
+    }
+    // Deduplicate keywords while preserving order
+    keywords = Array.from(new Set(keywords));
+
+    const stemWord = (w) => {
+      if (!w || w.length < 5) return w;
+      return w
+        .replace(/(?:ing|tion|sion|ment|ness|able|ible|ive|ous|ies|es|ed|s)$/i, (m) => (m === "ies" ? "y" : ""))
+        .trim() || w;
+    };
+
+    const keywordEntries = keywords.map(kw => ({
+      kw,
+      stem: stemWord(kw),
+      wordRegex: new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")
+    }));
+
+    const normalizedPhrase = keywords.slice(0, 5).join(" ");
+
+    let libraryID = 1;
+    try {
+      libraryID = win?.ZoteroPane?.getSelectedLibraryID?.() || Zotero.Libraries?.userLibraryID || 1;
+    } catch (_) {}
+
+    // 1. Query Zotero's built-in quicksearch-everything (which includes indexed PDF full-text)
+    const fulltextHitsByItem = new Map(); // itemID -> Set<kw>
+    const candidateItemMap   = new Map(); // itemID -> Zotero.Item
+
+    const resolveRegularParent = async (rawItem) => {
+      if (!rawItem) return null;
+      try {
+        if (rawItem.deleted) return null;
+        if (rawItem.isRegularItem && rawItem.isRegularItem()) return rawItem;
+        if (rawItem.isAttachment && rawItem.isAttachment() && rawItem.parentItemID) {
+          const parent = await Zotero.Items.getAsync(rawItem.parentItemID);
+          if (parent && !parent.deleted && parent.isRegularItem && parent.isRegularItem()) {
+            return parent;
+          }
+        }
+      } catch (_) {}
+      return null;
+    };
+
+    try {
+      if (typeof Zotero.Search === "function") {
+        for (const { kw } of keywordEntries.slice(0, 8)) {
+          try {
+            const s = new Zotero.Search();
+            s.libraryID = libraryID;
+            s.addCondition("quicksearch-everything", "contains", kw);
+            const hitIds = await s.search();
+            if (hitIds && hitIds.length > 0) {
+              const items = await Zotero.Items.getAsync(hitIds.slice(0, 150));
+              for (const raw of (Array.isArray(items) ? items : [items])) {
+                const reg = await resolveRegularParent(raw);
+                if (reg) {
+                  candidateItemMap.set(reg.id, reg);
+                  if (!fulltextHitsByItem.has(reg.id)) {
+                    fulltextHitsByItem.set(reg.id, new Set());
+                  }
+                  fulltextHitsByItem.get(reg.id).add(kw);
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    } catch (searchErr) {
+      Zotero.debug("[AcademicLens] Zotero.Search warning: " + searchErr);
+    }
+
+    // 2. Also load regular items from the active library so stem/partial matches are scored
+    try {
+      const allLibraryItems = await Zotero.Items.getAll(libraryID, false, false);
+      if (Array.isArray(allLibraryItems)) {
+        for (const it of allLibraryItems) {
+          if (it && !it.deleted && it.isRegularItem && it.isRegularItem()) {
+            candidateItemMap.set(it.id, it);
+          }
+        }
+      }
+    } catch (allErr) {
+      Zotero.debug("[AcademicLens] Zotero.Items.getAll warning: " + allErr);
+    }
+
+    const candidates = Array.from(candidateItemMap.values());
+    if (candidates.length === 0) return [];
+
+    // 3. Score each candidate paper against the query
+    const scored = [];
+    for (const item of candidates) {
+      try {
+        const title    = String(item.getField("title") || "");
+        const abstract = String(item.getField("abstractNote") || "");
+        const pub      = String(item.getField("publicationTitle") || item.getField("proceedingsTitle") || "");
+        const date     = String(item.getField("date") || item.getField("year") || "");
+        const creators = (item.getCreators ? (item.getCreators() || []) : [])
+          .map(c => `${c.firstName || ""} ${c.lastName || ""} ${c.name || ""}`)
+          .join(" ");
+        const tags     = (item.getTags ? (item.getTags() || []) : [])
+          .map(t => (typeof t === "string" ? t : (t.tag || "")))
+          .join(" ");
+
+        const titleLower    = title.toLowerCase();
+        const abstractLower = abstract.toLowerCase();
+        const tagsLower     = tags.toLowerCase();
+        const creatorsLower = creators.toLowerCase();
+        const pubLower      = pub.toLowerCase();
+        const dateLower     = date.toLowerCase();
+        const ftKwSet       = fulltextHitsByItem.get(item.id) || new Set();
+
+        let score = 0;
+        let matchedKeywordsCount = 0;
+
+        // Multi-word phrase boost
+        if (normalizedPhrase.length >= 4 && keywordEntries.length >= 2) {
+          if (titleLower.includes(normalizedPhrase))    score += 18;
+          if (tagsLower.includes(normalizedPhrase))     score += 14;
+          if (abstractLower.includes(normalizedPhrase)) score += 10;
+        }
+
+        for (const { kw, stem, wordRegex } of keywordEntries) {
+          let kwScore = 0;
+
+          // Title match
+          if (wordRegex.test(titleLower)) {
+            kwScore += 9;
+          } else if (titleLower.includes(kw)) {
+            kwScore += 7;
+          } else if (stem.length >= 4 && titleLower.includes(stem)) {
+            kwScore += 5;
+          }
+
+          // Tags / keywords match
+          if (tagsLower.includes(kw)) {
+            kwScore += 7;
+          } else if (stem.length >= 4 && tagsLower.includes(stem)) {
+            kwScore += 4.5;
+          }
+
+          // Author / Year match
+          if (creatorsLower.includes(kw) || dateLower.includes(kw)) {
+            kwScore += 6;
+          }
+
+          // Abstract match
+          if (abstractLower.includes(kw)) {
+            let hits = 0;
+            let pos = abstractLower.indexOf(kw);
+            while (pos !== -1 && hits < 4) {
+              hits++;
+              pos = abstractLower.indexOf(kw, pos + kw.length);
+            }
+            kwScore += 4 + Math.min(3, hits - 1);
+          } else if (stem.length >= 4 && abstractLower.includes(stem)) {
+            kwScore += 2.5;
+          }
+
+          // Venue / publication match
+          if (pubLower.includes(kw)) {
+            kwScore += 2;
+          }
+
+          // Full-text index match from Zotero.Search
+          if (ftKwSet.has(kw)) {
+            kwScore += 5;
+          }
+
+          if (kwScore > 0) {
+            matchedKeywordsCount++;
+            score += kwScore;
+          }
+        }
+
+        // Coverage bonus for matching multiple distinct query keywords
+        if (matchedKeywordsCount > 1) {
+          score += matchedKeywordsCount * 5;
+        }
+
+        if (score > 0) {
+          // Slight tie-breaker for items with rich metadata/attachments
+          if (abstract.trim().length > 40) score += 0.3;
+          try {
+            const attIds = item.getAttachments ? (item.getAttachments() || []) : [];
+            if (attIds.length > 0) score += 0.2;
+          } catch (_) {}
+          scored.push({ item, score, matchedKeywordsCount });
+        }
+      } catch (_) {}
+    }
+
+    // 4. Fallback prefix match if fewer than `minResults` items matched
+    if (scored.length < minResults && keywordEntries.length > 0) {
+      const alreadyIds = new Set(scored.map(s => s.item.id));
+      for (const item of candidates) {
+        if (alreadyIds.has(item.id)) continue;
+        try {
+          const hay = [
+            item.getField("title") || "",
+            item.getField("abstractNote") || "",
+            (item.getTags ? (item.getTags() || []) : []).map(t => t.tag || t).join(" ")
+          ].join(" ").toLowerCase();
+
+          let fallbackScore = 0;
+          for (const { kw } of keywordEntries) {
+            const prefix = kw.slice(0, Math.min(4, kw.length));
+            if (prefix.length >= 3 && hay.includes(prefix)) {
+              fallbackScore += 1.5;
+            }
+          }
+          if (fallbackScore > 0) {
+            scored.push({ item, score: fallbackScore, matchedKeywordsCount: 1 });
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (scored.length === 0) return [];
+
+    scored.sort((a, b) => b.score - a.score);
+
+    // 5. Select between minResults (2) and maxResults (5) papers
+    const topScore = scored[0].score;
+    const chosenItems = [];
+    for (let i = 0; i < scored.length && chosenItems.length < maxResults; i++) {
+      const entry = scored[i];
+      if (chosenItems.length < minResults || entry.score >= topScore * 0.28) {
+        chosenItems.push(entry.item);
+      }
+    }
+
+    Zotero.debug(`[AcademicLens] Auto-search for "${query}" matched ${chosenItems.length} papers (out of ${scored.length} candidates).`);
+
+    // 6. Build docEntries and await PDF -> .txt extraction
+    const docEntries = [];
+    const extractionPromises = [];
+    for (const item of chosenItems) {
+      const docEntry = await this.buildDocEntryFromItem(item, win);
+      if (docEntry) {
+        docEntries.push(docEntry);
+        if (docEntry._extractPromise && !this.abstractOnly) {
+          extractionPromises.push(docEntry._extractPromise);
+        }
+      }
+    }
+
+    if (extractionPromises.length > 0) {
+      await Promise.allSettled(extractionPromises);
+    }
+
+    return docEntries;
+  },
+
+  async extractItemPdfToTxt(item, directAttachment, docEntry, win) {
+    try {
+      const candidateAttachments = [];
+      if (directAttachment) {
+        candidateAttachments.push(directAttachment);
+      }
+
+      if (item.isRegularItem && item.isRegularItem()) {
+        try {
+          if (typeof item.getBestAttachment === "function") {
+            const best = await item.getBestAttachment();
+            if (best && !candidateAttachments.some(a => a.id === best.id)) {
+              candidateAttachments.push(best);
+            }
+          }
+        } catch (_) {}
+
+        try {
+          const attIds = (typeof item.getAttachments === "function") ? (item.getAttachments() || []) : [];
+          if (attIds.length > 0) {
+            const atts = await Zotero.Items.getAsync(attIds);
+            for (const a of (Array.isArray(atts) ? atts : [atts])) {
+              if (a && !candidateAttachments.some(existing => existing.id === a.id)) {
+                candidateAttachments.push(a);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      const isPdfAtt = (att) => Boolean(
+        att && (
+          (typeof att.isPDFAttachment === "function" && att.isPDFAttachment()) ||
+          att.attachmentContentType === "application/pdf" ||
+          String(att.attachmentFilename || "").toLowerCase().endsWith(".pdf")
+        )
+      );
+
+      const isTxtAtt = (att) => Boolean(
+        att && (
+          att.attachmentContentType === "text/plain" ||
+          String(att.attachmentFilename || "").toLowerCase().endsWith(".txt")
+        )
+      );
+
+      const pdfAtt = candidateAttachments.find(isPdfAtt);
+      const txtAtt = candidateAttachments.find(isTxtAtt);
+
+      let extractedText = "";
+      let savedTxtPath = null;
+
+      if (pdfAtt) {
+        docEntry.hasPdf = true;
+        const pdfPath = (typeof pdfAtt.getFilePathAsync === "function")
+          ? await pdfAtt.getFilePathAsync()
+          : (typeof pdfAtt.getFilePath === "function" ? pdfAtt.getFilePath() : null);
+
+        const targetTxtPath = pdfPath ? pdfPath.replace(/\.pdf$/i, ".txt") : null;
+
+        // 1. If a converted .txt file already exists alongside the PDF, read it first
+        if (targetTxtPath) {
+          try {
+            if (typeof IOUtils !== "undefined" && IOUtils.exists && await IOUtils.exists(targetTxtPath)) {
+              extractedText = await IOUtils.readUTF8(targetTxtPath);
+              if (extractedText && extractedText.trim()) {
+                savedTxtPath = targetTxtPath;
+              }
+            } else if (Zotero.File?.pathToFile) {
+              const nsTxtFile = Zotero.File.pathToFile(targetTxtPath);
+              if (nsTxtFile && nsTxtFile.exists()) {
+                extractedText = await Zotero.File.getContentsAsync(nsTxtFile.path);
+                if (extractedText && extractedText.trim()) {
+                  savedTxtPath = targetTxtPath;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 2. Option A: Zotero's built-in .zotero-ft-cache + Zotero.Fulltext.indexItems
+        if (!extractedText || !extractedText.trim()) {
+          try {
+            let cacheFile = Zotero.Fulltext?.getItemCacheFile?.(pdfAtt);
+            if (!cacheFile || !cacheFile.exists()) {
+              try {
+                await Zotero.Fulltext?.indexItems?.([pdfAtt.id], { complete: true });
+              } catch (_) {
+                try { await Zotero.Fulltext?.indexItems?.([pdfAtt.id]); } catch (_2) {}
+              }
+              cacheFile = Zotero.Fulltext?.getItemCacheFile?.(pdfAtt);
+            }
+            if (cacheFile && cacheFile.exists()) {
+              extractedText = await Zotero.File.getContentsAsync(cacheFile.path);
+            }
+          } catch (ftErr) {
+            Zotero.debug("[AcademicLens] Fulltext cache extraction warning: " + ftErr);
+          }
+        }
+
+        // 3. Fallback: Zotero.PDFWorker.getFullText or Zotero.Fulltext.getItemContent
+        if (!extractedText || !extractedText.trim()) {
+          try {
+            const workerRes = await Zotero.PDFWorker?.getFullText?.(pdfAtt.id);
+            if (workerRes && typeof workerRes.text === "string" && workerRes.text.trim()) {
+              extractedText = workerRes.text;
+            }
+          } catch (_) {}
+        }
+
+        if (!extractedText || !extractedText.trim()) {
+          try {
+            const itemContent = await Zotero.Fulltext?.getItemContent?.(pdfAtt.id);
+            if (itemContent && typeof itemContent.content === "string") {
+              extractedText = itemContent.content;
+            } else if (typeof itemContent === "string") {
+              extractedText = itemContent;
+            }
+          } catch (_) {}
+        }
+
+        // 4. Write converted .txt file alongside the PDF in Zotero storage
+        if (extractedText && extractedText.trim() && targetTxtPath && !savedTxtPath) {
+          try {
+            if (typeof IOUtils !== "undefined" && IOUtils.writeUTF8) {
+              await IOUtils.writeUTF8(targetTxtPath, extractedText);
+              savedTxtPath = targetTxtPath;
+            } else if (Zotero.File?.putContentsAsync && Zotero.File?.pathToFile) {
+              await Zotero.File.putContentsAsync(Zotero.File.pathToFile(targetTxtPath), extractedText);
+              savedTxtPath = targetTxtPath;
+            }
+            Zotero.debug(`[AcademicLens] Converted PDF to TXT: ${targetTxtPath} (${extractedText.length} chars)`);
+          } catch (writeErr) {
+            Zotero.debug("[AcademicLens] Could not write .txt file alongside PDF: " + writeErr);
+          }
+        }
+      } else if (txtAtt) {
+        // Direct .txt attachment support
+        try {
+          const txtPath = (typeof txtAtt.getFilePathAsync === "function")
+            ? await txtAtt.getFilePathAsync()
+            : null;
+          if (txtPath) {
+            extractedText = await Zotero.File.getContentsAsync(txtPath);
+            savedTxtPath = txtPath;
+            docEntry.hasPdf = true;
+          }
+        } catch (_) {}
+      }
+
+      if (extractedText && extractedText.trim()) {
+        docEntry.fullText = this.normalizePdfText(extractedText);
+        docEntry.txtPath  = savedTxtPath;
+      }
+    } catch (err) {
+      Zotero.debug("[AcademicLens] PDF extraction error: " + err);
+    } finally {
+      docEntry.isExtracting = false;
+      this.renderDocumentChips(win);
+    }
+  },
+
+  normalizePdfText(text) {
+    if (!text) return "";
+    return text
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t\u3000]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   },
 
   removeDocument(id, win) {
@@ -917,33 +1631,98 @@ Zotero.AcademicLens = {
     this.renderDocumentChips(win);
   },
 
-  renderDocumentChips(win) {
-    const panes = win.document.querySelectorAll("#academic-lens-pane-library, #academic-lens-pane-reader");
-    if (!panes || panes.length === 0) return;
+  clearSelectedDocuments(win) {
+    this.selectedDocuments = [];
+    this.renderDocumentChips(win);
+  },
 
-    panes.forEach(pane => {
-      const listContainer = pane.querySelector("#al-doc-list");
-      const countSpan     = pane.querySelector("#al-doc-count");
-      if (countSpan) countSpan.textContent = String(this.selectedDocuments.length);
-      if (!listContainer) return;
+  renderDocumentChips(win = null) {
+    const winsToUpdate = [];
+    if (win && !win.closed && win.document) {
+      winsToUpdate.push(win);
+    }
+    if (this.windows) {
+      for (const [w] of this.windows) {
+        if (w && !w.closed && w.document && !winsToUpdate.includes(w)) {
+          winsToUpdate.push(w);
+        }
+      }
+    }
+    if (winsToUpdate.length === 0) {
+      try {
+        const mw = (typeof Zotero !== "undefined" && Zotero.getMainWindow) ? Zotero.getMainWindow() : null;
+        if (mw && !mw.closed && mw.document) winsToUpdate.push(mw);
+      } catch (_) {}
+    }
 
-      listContainer.innerHTML = "";
+    winsToUpdate.forEach(w => {
+      const panes = w.document.querySelectorAll("#academic-lens-pane-library, #academic-lens-pane-reader");
+      if (!panes || panes.length === 0) return;
 
-      this.selectedDocuments.forEach((doc, idx) => {
-        const docOwner = pane.ownerDocument || win.document;
-        const chip = docOwner.createElement("div");
-        chip.className = "al-doc-chip";
-        chip.innerHTML = `
-          <div class="al-doc-info">
-            <div class="al-doc-header">[[${idx + 1}]] ${this.escapeHtml(doc.display)}</div>
-            <div class="al-doc-title" title="${this.escapeHtml(doc.title)}">${this.escapeHtml(doc.title)}</div>
-          </div>
-          <button class="al-doc-remove" title="Remove">✕</button>
-        `;
-        chip.querySelector(".al-doc-remove")?.addEventListener("click", () => {
-          this.removeDocument(doc.id, win);
+      panes.forEach(pane => {
+        const listContainer = pane.querySelector("#al-doc-list");
+        const countSpan     = pane.querySelector("#al-doc-count");
+        const devToggleBtn  = pane.querySelector("#al-btn-abstract-only");
+
+        if (countSpan) countSpan.textContent = String(this.selectedDocuments.length);
+        if (devToggleBtn) {
+          devToggleBtn.classList.toggle("active", Boolean(this.abstractOnly));
+          devToggleBtn.setAttribute("aria-pressed", this.abstractOnly ? "true" : "false");
+          devToggleBtn.textContent = this.abstractOnly ? "🧪 Abstract-Only: ON" : "📄 Mode: PDF + Abstract";
+          devToggleBtn.style.borderColor = this.abstractOnly ? "rgba(250,173,20,0.5)" : "rgba(82,214,138,0.4)";
+          devToggleBtn.style.background = this.abstractOnly ? "rgba(250,173,20,0.16)" : "rgba(82,214,138,0.14)";
+          devToggleBtn.style.color = this.abstractOnly ? "#ffc53d" : "#52d68a";
+        }
+
+        if (!listContainer) return;
+
+        listContainer.innerHTML = "";
+
+        this.selectedDocuments.forEach((doc, idx) => {
+          const docOwner = pane.ownerDocument || w.document;
+          const chip = docOwner.createElement("div");
+          chip.className = "al-doc-chip";
+
+          let badgeHtml = "";
+          if (doc.isExtracting) {
+            badgeHtml = `<span class="al-doc-source-badge extracting" title="Extracting text from attached PDF…">⏳ PDF→TXT…</span>`;
+          } else if (doc.fullText && doc.fullText.length > 0) {
+            const charK = Math.max(1, Math.round(doc.fullText.length / 1000));
+            if (this.abstractOnly) {
+              badgeHtml = `<span class="al-doc-source-badge abstract-dev" title="Abstract-Only developer mode active (PDF .txt extracted: ${charK}k chars, ignored in query)">🧪 Abstract Only (PDF ${charK}k)</span>`;
+            } else {
+              const pathHint = doc.txtPath ? `Saved: ${doc.txtPath}` : "Extracted from attached PDF";
+              badgeHtml = `<span class="al-doc-source-badge pdf-ready" title="${this.escapeHtml(pathHint)}">📄 PDF .txt (${charK}k chars)</span>`;
+            }
+          } else {
+            badgeHtml = `<span class="al-doc-source-badge no-pdf" title="No PDF attachment detected; using abstract only">📝 Abstract Only</span>`;
+          }
+
+          chip.innerHTML = `
+            <div class="al-doc-info">
+              <div class="al-doc-header-row">
+                <span class="al-doc-header">[[${idx + 1}]] ${this.escapeHtml(doc.display)}</span>
+                ${badgeHtml}
+              </div>
+              <div class="al-doc-title" title="${this.escapeHtml(doc.title)}">${this.escapeHtml(doc.title)}</div>
+            </div>
+            <span class="al-doc-remove" role="button" tabindex="0" title="Remove source" aria-label="Remove source" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:50%;background:#e05252;border:1px solid #ff7875;color:#ffffff;font-size:12px;font-weight:bold;cursor:pointer;flex-shrink:0;user-select:none;margin-left:8px;line-height:1;text-align:center;">✕</span>
+          `;
+          const rmBtn = chip.querySelector(".al-doc-remove");
+          rmBtn?.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.removeDocument(doc.id, w);
+          });
+          rmBtn?.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              this.removeDocument(doc.id, w);
+            }
+          });
+          listContainer.appendChild(chip);
         });
-        listContainer.appendChild(chip);
       });
     });
   },
@@ -976,32 +1755,260 @@ Zotero.AcademicLens = {
     return text.replace(/^- /gm, "• ");
   },
 
-  extractConfidence(text) {
-    if (!text) return null;
-    const m = text.match(/\|CONFIDENCE\|(\d+)\|/);
-    return m ? parseInt(m[1], 10) : null;
-  },
-
   cleanResponseTags(text) {
     if (!text) return "";
-    return text.replace(/\|CONFIDENCE\|\d+\|/g, "").trim();
+    return text
+      .replace(/\|MESSAGE_ID\|[^|]*\|END_ID\|/g, "")
+      .replace(/\|BIB_KEYWORDS\|[^|]*\|END_BIB\|/g, "")
+      .replace(/\|SOURCES\|[^|]*\|END_SOURCES\|/g, "")
+      .replace(/\|CONFIDENCE\|\d+\|/g, "")
+      .trim();
   },
 
   /* ============================================================
      Prompt Generation & Chat
   ============================================================ */
 
-  buildContext() {
-    return this.selectedDocuments.map((doc, idx) => {
-      const clean = this.stripBracketCitations(doc.abstract || "No abstract available.");
+  /**
+   * Splits extracted PDF .txt into passages and selects the most relevant
+   * excerpts for the user's query within `maxChars` so the prompt fits
+   * within llama-server's 2048-token context window (`--ctx-size 2048`).
+   */
+  selectRelevantPdfExcerpts(fullText, query, maxChars = 2200) {
+    if (!fullText || maxChars <= 0) return "";
+    const cleaned = this.stripBracketCitations(fullText).trim();
+    if (cleaned.length <= maxChars) return cleaned;
+
+    // Split into ~500-char chunks along paragraph/sentence boundaries
+    const chunkSize = 500;
+    const chunks = [];
+    let pos = 0;
+    while (pos < cleaned.length) {
+      let end = Math.min(pos + chunkSize, cleaned.length);
+      if (end < cleaned.length) {
+        const nextBreak = cleaned.lastIndexOf("\n", end);
+        const nextDot   = cleaned.lastIndexOf(". ", end);
+        if (nextBreak > pos + 200) end = nextBreak + 1;
+        else if (nextDot > pos + 200) end = nextDot + 2;
+      }
+      const text = cleaned.slice(pos, end).trim();
+      if (text.length > 40) {
+        chunks.push({ idx: chunks.length, text });
+      }
+      pos = Math.max(pos + 1, end);
+    }
+
+    if (chunks.length === 0) return cleaned.slice(0, maxChars);
+
+    // Extract query keywords (ignore stop words)
+    const stopWords = new Set([
+      "the", "and", "for", "that", "this", "with", "from", "what", "are", "how",
+      "these", "papers", "paper", "study", "studies", "about", "used", "across",
+      "into", "their", "they", "have", "has", "was", "were", "will", "can"
+    ]);
+    const queryTerms = String(query || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !stopWords.has(w));
+
+    const academicBoostTerms = [
+      "result", "results", "finding", "findings", "method", "methodology",
+      "conclusion", "conclusions", "contribution", "propose", "demonstrate",
+      "experiment", "evaluation", "discussion", "summary", "we show"
+    ];
+
+    // Score each chunk
+    const scored = chunks.map(c => {
+      const lower = c.text.toLowerCase();
+      // Skip likely bibliography / reference list chunks near the end
+      const isRefList = /\b(references|bibliography|acknowledg(e)?ments)\b/i.test(lower) &&
+        (c.text.match(/\b(19|20)\d{2}\b/g) || []).length >= 4;
+      if (isRefList) return { ...c, score: -10 };
+
+      let score = 0;
+      for (const term of queryTerms) {
+        let idx = lower.indexOf(term);
+        let hits = 0;
+        while (idx !== -1 && hits < 5) {
+          hits++;
+          idx = lower.indexOf(term, idx + term.length);
+        }
+        if (hits > 0) score += 4 + Math.min(hits, 3);
+      }
+      for (const boost of academicBoostTerms) {
+        if (lower.includes(boost)) score += 1.5;
+      }
+      // Slight preference for early/mid body sections over boilerplate header/footer
+      if (c.idx >= 1 && c.idx <= Math.ceil(chunks.length * 0.75)) {
+        score += 1;
+      }
+      return { ...c, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+
+    const selected = [];
+    let usedChars = 0;
+    for (const item of scored) {
+      if (usedChars + item.text.length + 10 > maxChars) {
+        if (selected.length === 0) {
+          selected.push({ idx: item.idx, text: item.text.slice(0, maxChars) });
+        }
+        break;
+      }
+      selected.push(item);
+      usedChars += item.text.length + 6;
+    }
+
+    // Re-order selected chunks in natural document order
+    selected.sort((a, b) => a.idx - b.idx);
+    return selected.map(s => s.text).join("\n...\n");
+  },
+
+  buildContext(docs = null, query = "", totalCharBudget = null) {
+    const list = (docs && docs.length > 0) ? docs : this.selectedDocuments;
+    const budget = totalCharBudget || this.DEFAULT_MAX_CONTEXT_CHARS || 3200;
+    const perDocBudget = Math.max(400, Math.floor(budget / Math.max(1, list.length)));
+
+    return list.map((doc, idx) => {
+      let cleanAbstract = this.stripBracketCitations(doc.abstract || "No abstract available.");
+      const useFullText = !this.abstractOnly && doc.fullText && doc.fullText.trim().length > 0;
+
+      if (useFullText && cleanAbstract.length > Math.floor(perDocBudget * 0.45)) {
+        cleanAbstract = cleanAbstract.slice(0, Math.floor(perDocBudget * 0.45)) + "…";
+      } else if (!useFullText && cleanAbstract.length > perDocBudget) {
+        cleanAbstract = cleanAbstract.slice(0, perDocBudget) + "…";
+      }
+
+      let bodySection = `Abstract: ${cleanAbstract}`;
+      if (useFullText) {
+        const pdfCharBudget = Math.max(250, perDocBudget - cleanAbstract.length - 120);
+        const excerpts = this.selectRelevantPdfExcerpts(doc.fullText, query, pdfCharBudget);
+        if (excerpts) {
+          bodySection += `\nPDF Text Excerpts:\n${excerpts}`;
+        }
+      }
+
       return (
         `--- START SOURCE [[${idx + 1}]] ---\n` +
         `Title: ${doc.title}\n` +
         `Authors: ${doc.authors} (${doc.year})\n` +
-        `Abstract: ${clean}\n` +
+        `${bodySection}\n` +
         `--- END SOURCE [[${idx + 1}]] ---`
       );
     }).join("\n\n");
+  },
+
+  renderMatchedPapersCard(msgEl, matchedDocs, win = null) {
+    if (!msgEl || !matchedDocs || matchedDocs.length === 0) return;
+    const doc = msgEl.ownerDocument || win?.document;
+    if (!doc) return;
+
+    msgEl.querySelector(".al-matched-papers-card")?.remove();
+
+    const card = doc.createElement("div");
+    card.className = "al-matched-papers-card";
+    card.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:10px;padding:8px 10px;background:#252532;border:1px solid rgba(141,119,202,0.35);border-radius:6px;";
+
+    const hdr = doc.createElement("div");
+    hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;";
+
+    const titleEl = doc.createElement("span");
+    titleEl.style.cssText = "font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#b5a3ea;";
+    titleEl.textContent = `🔍 Matched Library Papers (${matchedDocs.length})`;
+    hdr.appendChild(titleEl);
+
+    const addAllBtn = doc.createElement("span");
+    addAllBtn.setAttribute("role", "button");
+    addAllBtn.setAttribute("tabindex", "0");
+    addAllBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 7px;background:#2f2c44;border:1px solid #6c5ce7;border-radius:4px;color:#e0e0f0;font-size:10px;font-weight:600;cursor:pointer;user-select:none;";
+    addAllBtn.textContent = "+ Pin All to Sources";
+    addAllBtn.title = "Add all matched papers to Selected Sources for follow-up questions";
+    addAllBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      for (const d of matchedDocs) {
+        if (!this.selectedDocuments.some(existing => existing.id === d.id)) {
+          this.selectedDocuments.push({ ...d });
+        }
+      }
+      this.renderDocumentChips(win);
+      addAllBtn.textContent = "✓ Pinned";
+    });
+    hdr.appendChild(addAllBtn);
+    card.appendChild(hdr);
+
+    const listEl = doc.createElement("div");
+    listEl.style.cssText = "display:flex;flex-direction:column;gap:5px;";
+
+    matchedDocs.forEach((d, idx) => {
+      const row = doc.createElement("div");
+      row.className = "al-matched-paper-row";
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;background:#1c1c26;border:1px solid #353548;border-left:3px solid #8d77ca;border-radius:4px;cursor:pointer;";
+      row.title = `Click to select "${d.title}" in Zotero`;
+
+      const info = doc.createElement("div");
+      info.style.cssText = "display:flex;flex-direction:column;min-width:0;flex:1;gap:2px;";
+
+      const topLine = doc.createElement("div");
+      topLine.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
+
+      const citeSpan = doc.createElement("span");
+      citeSpan.style.cssText = "font-size:11px;font-weight:700;color:#ab9ad6;";
+      citeSpan.textContent = `[[${idx + 1}]] ${d.display}`;
+      topLine.appendChild(citeSpan);
+
+      const badge = doc.createElement("span");
+      const hasPdfTxt = Boolean(d.fullText && d.fullText.trim().length > 0);
+      badge.className = "al-doc-source-badge " + (hasPdfTxt ? (this.abstractOnly ? "abstract-dev" : "pdf-ready") : "no-pdf");
+      badge.textContent = hasPdfTxt
+        ? (this.abstractOnly ? "🧪 Abstract Only" : "📄 PDF .txt")
+        : "📝 Abstract";
+      topLine.appendChild(badge);
+      info.appendChild(topLine);
+
+      const paperTitle = doc.createElement("div");
+      paperTitle.style.cssText = "font-size:11px;color:#d0d0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      paperTitle.textContent = d.title;
+      info.appendChild(paperTitle);
+
+      row.appendChild(info);
+
+      const addOneBtn = doc.createElement("span");
+      addOneBtn.setAttribute("role", "button");
+      addOneBtn.setAttribute("tabindex", "0");
+      addOneBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 6px;background:#282834;border:1px solid #4a4a5e;border-radius:4px;color:#ccc;font-size:10px;font-weight:600;cursor:pointer;user-select:none;flex-shrink:0;";
+      addOneBtn.textContent = "+ Pin";
+      addOneBtn.title = "Add this paper to Selected Sources";
+      addOneBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!this.selectedDocuments.some(existing => existing.id === d.id)) {
+          this.selectedDocuments.push({ ...d });
+          this.renderDocumentChips(win);
+        }
+        addOneBtn.textContent = "✓";
+      });
+      row.appendChild(addOneBtn);
+
+      row.addEventListener("click", () => {
+        try {
+          if (win && win.ZoteroPane && d.id) {
+            win.ZoteroPane.selectItem(d.id);
+          }
+        } catch (_) {}
+      });
+
+      listEl.appendChild(row);
+    });
+
+    card.appendChild(listEl);
+
+    const contentEl = msgEl.querySelector(".al-msg-content");
+    if (contentEl) {
+      msgEl.insertBefore(card, contentEl);
+    } else {
+      msgEl.appendChild(card);
+    }
   },
 
   async handleSend(win) {
@@ -1014,16 +2021,13 @@ Zotero.AcademicLens = {
     const query    = textarea ? textarea.value.trim() : "";
     if (!query) return;
 
-    if (this.selectedDocuments.length === 0) {
-      this._alert(win, "Please add at least one article first.");
-      return;
-    }
-
     textarea.value = "";
 
-    this.appendMessage(pane, "user", query);
+    const isAutoSearch = (this.selectedDocuments.length === 0);
 
-    const assistantMsgEl = this.appendMessage(pane, "assistant", "");
+    this.appendMessage(pane, "user", query, win);
+
+    const assistantMsgEl = this.appendMessage(pane, "assistant", "", win);
     const contentEl      = assistantMsgEl?.querySelector(".al-msg-content");
     contentEl?.classList.add("al-streaming-cursor");
 
@@ -1047,41 +2051,126 @@ Zotero.AcademicLens = {
       this.abortController = { signal: null, abort: () => {} };
     }
 
-    const systemPrompt = (
-      "You are a research assistant. Answer ONLY from the provided source materials.\n" +
-      "After each bullet point cite the source with double brackets, e.g., [[1]].\n" +
-      "At the end of your reply append a confidence score in the format: |CONFIDENCE|score|\n\n" +
-      `<context>\n${this.buildContext()}\n</context>`
-    );
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...this.chatHistory.slice(-6).map(h => ({ role: h.role, content: h.content })),
-      { role: "user", content: query }
-    ];
-
-    let fullText = "";
+    let queryDocs = [];
 
     try {
+      if (isAutoSearch) {
+        if (contentEl) {
+          contentEl.textContent = "🔍 Searching your Zotero library for 2–5 relevant papers…";
+        }
+        queryDocs = await this.searchLibraryPapers(query, win, 2, 5);
+        if (!queryDocs || queryDocs.length === 0) {
+          assistantMsgEl?.querySelector(".book")?.remove();
+          contentEl?.classList.remove("al-streaming-cursor");
+          if (contentEl) {
+            contentEl.textContent = `No matching papers were found in your Zotero library for "${query}". Try different keywords or drag papers into Selected Sources.`;
+          }
+          return;
+        }
+        this.renderMatchedPapersCard(assistantMsgEl, queryDocs, win);
+        if (contentEl) {
+          contentEl.textContent = "";
+        }
+      } else {
+        // Wait for any in-flight PDF → .txt extractions before snapshotting
+        const pendingExtractions = this.selectedDocuments
+          .map(d => d._extractPromise)
+          .filter(Boolean);
+        if (pendingExtractions.length > 0 && !this.abstractOnly) {
+          await Promise.allSettled(pendingExtractions);
+        }
+
+        // Snapshot sources for this question
+        queryDocs = [...this.selectedDocuments];
+
+        // Clear sources for each new question
+        this.selectedDocuments = [];
+        this.renderDocumentChips(win);
+      }
+
+      const hasPdfText = !this.abstractOnly && queryDocs.some(d => d.fullText && d.fullText.trim().length > 0);
+      const buildMessagesWithBudget = (charBudget, historyTurns, forceAbstractOnly = false) => {
+        const prevAbsOnly = this.abstractOnly;
+        if (forceAbstractOnly) this.abstractOnly = true;
+        const ctxStr = this.buildContext(queryDocs, query, charBudget);
+        this.abstractOnly = prevAbsOnly;
+
+        const sysPrompt = (
+          "You are a research assistant. Use ONLY the provided context to answer in concise bullet points.\n" +
+          "At the end of EVERY bullet point, cite the source using double brackets, e.g., [[1]].\n" +
+          "Be extremely brief to ensure rapid delivery.\n\n" +
+          `<context>\n${ctxStr}\n</context>`
+        );
+
+        const recentHistory = historyTurns > 0
+          ? this.chatHistory.slice(-historyTurns).map(h => ({
+              role: h.role,
+              content: String(h.content || "").slice(0, 500)
+            }))
+          : [];
+
+        return [
+          { role: "system", content: sysPrompt },
+          ...recentHistory,
+          { role: "user", content: query }
+        ];
+      };
+
+      let fullText = "";
+
       const url = this.endpoint.replace(/\/+$/, "") + "/v1/chat/completions";
-
       const fetchFunc = (win && win.fetch) || (typeof fetch !== 'undefined' ? fetch : (typeof window !== 'undefined' ? window.fetch : null));
-      const resp = await fetchFunc(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer ollama"
-        },
-        body: JSON.stringify({
-          model:      this.modelName,
-          messages,
-          stream:     true,
-          max_tokens: this.maxTokens
-        }),
-        signal: this.abortController.signal
-      });
 
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      const attemptRequest = async (messagesPayload, maxTok) => {
+        return fetchFunc(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer ollama"
+          },
+          body: JSON.stringify({
+            model:      this.modelName,
+            messages:   messagesPayload,
+            stream:     true,
+            max_tokens: maxTok
+          }),
+          signal: this.abortController.signal
+        });
+      };
+
+      const initialMaxTokens = hasPdfText ? Math.min(this.maxTokens, 512) : this.maxTokens;
+      const initialHistory   = hasPdfText ? 2 : 4;
+      let resp = await attemptRequest(
+        buildMessagesWithBudget(this.DEFAULT_MAX_CONTEXT_CHARS, initialHistory, false),
+        initialMaxTokens
+      );
+
+      // If llama-server returns HTTP 400 (e.g. exceed_context_size_error on 2048-token ctx),
+      // automatically retry with a tighter context budget so the user's question succeeds.
+      if (resp.status === 400) {
+        Zotero.debug("[AcademicLens] HTTP 400 on initial request; retrying with compact context budget (1500 chars)...");
+        resp = await attemptRequest(
+          buildMessagesWithBudget(1500, 0, false),
+          400
+        );
+      }
+
+      if (resp.status === 400 && hasPdfText) {
+        Zotero.debug("[AcademicLens] HTTP 400 persisted; falling back to abstract-only context...");
+        resp = await attemptRequest(
+          buildMessagesWithBudget(1500, 0, true),
+          400
+        );
+      }
+
+      if (!resp.ok) {
+        let errDetail = resp.statusText;
+        try {
+          const errJson = await resp.json();
+          if (errJson?.error?.message) errDetail = errJson.error.message;
+        } catch (_) {}
+        throw new Error(`HTTP ${resp.status}: ${errDetail}`);
+      }
 
       const reader  = resp.body.getReader();
       const TDecoder = (win && win.TextDecoder) || (typeof TextDecoder !== 'undefined' ? TextDecoder : (typeof window !== 'undefined' ? window.TextDecoder : null));
@@ -1114,7 +2203,7 @@ Zotero.AcademicLens = {
 
       assistantMsgEl?.querySelector(".book")?.remove();
       contentEl?.classList.remove("al-streaming-cursor");
-      this.finalizeAssistantMessage(assistantMsgEl, fullText, win.document);
+      this.finalizeAssistantMessage(assistantMsgEl, fullText, win.document, queryDocs, win);
 
       this.chatHistory.push({ role: "user",      content: query });
       this.chatHistory.push({ role: "assistant", content: fullText });
@@ -1171,18 +2260,19 @@ Zotero.AcademicLens = {
     contentEl.textContent = text;
   },
 
-  finalizeAssistantMessage(msgEl, fullResponse, doc) {
+  finalizeAssistantMessage(msgEl, fullResponse, doc, sourceDocs = [], win = null) {
     if (!msgEl) return;
     const contentEl = msgEl.querySelector(".al-msg-content");
     if (!contentEl) return;
 
-    const confidence = this.extractConfidence(fullResponse);
     let cleaned      = this.cleanResponseTags(fullResponse);
     cleaned          = this.formatBulletPoints(cleaned);
 
+    const docsToUse = (sourceDocs && sourceDocs.length > 0) ? sourceDocs : this.selectedDocuments;
+
     // Replace [[n]] with inline citation spans
     const docMap = {};
-    this.selectedDocuments.forEach((d, i) => { docMap[i + 1] = d.display; });
+    docsToUse.forEach((d, i) => { docMap[i + 1] = d.display; });
 
     let html = this.escapeHtml(cleaned);
     html = html.replace(/\[\[(\d+)\]\]/g, (_, n) => {
@@ -1192,29 +2282,68 @@ Zotero.AcademicLens = {
 
     contentEl.innerHTML = html;
 
-    if (confidence !== null) {
-      let cls = confidence > 70 ? "al-conf-high" : confidence > 40 ? "al-conf-med" : "al-conf-low";
-      const docToUse = doc || msgEl?.ownerDocument;
-      if (docToUse) {
-        const badge = docToUse.createElement("div");
-        badge.className = `al-confidence-badge ${cls}`;
-        badge.textContent = `Confidence: ${confidence}%`;
-        msgEl.appendChild(badge);
-      }
+    const docToUse = doc || msgEl?.ownerDocument;
+
+    // Sources list below assistant message (matching app.py)
+    if (docsToUse.length > 0 && docToUse) {
+      const srcList = docToUse.createElement("div");
+      srcList.className = "al-sources-list";
+      const title = docToUse.createElement("div");
+      title.className = "al-sources-title";
+      title.textContent = "SOURCES:";
+      srcList.appendChild(title);
+
+      const tagsWrapper = docToUse.createElement("div");
+      tagsWrapper.className = "al-sources-tags";
+
+      docsToUse.forEach((d, i) => {
+        const tag = docToUse.createElement("span");
+        tag.className = "al-source-tag academic";
+        tag.title = `${d.title} (${d.authors})`;
+        tag.textContent = `[[${i + 1}]] ${d.display}`;
+        tag.addEventListener("click", () => {
+          try {
+            if (win && win.ZoteroPane && d.id) {
+              win.ZoteroPane.selectItem(d.id);
+            }
+          } catch (_) {}
+        });
+        tagsWrapper.appendChild(tag);
+      });
+      srcList.appendChild(tagsWrapper);
+      msgEl.appendChild(srcList);
     }
   },
 
-  appendMessage(pane, sender, text) {
+  appendMessage(pane, sender, text, win = null) {
     const area = pane.querySelector("#al-messages-area");
     if (!area) return null;
 
-    const d   = pane.ownerDocument;
+    const d   = pane.ownerDocument || win?.document;
     const msg = d.createElement("div");
     msg.className = `al-message ${sender}`;
 
     const hdr = d.createElement("div");
     hdr.className   = "al-msg-header";
-    hdr.textContent = sender === "user" ? "You" : "Academic Lens";
+
+    const titleSpan = d.createElement("span");
+    titleSpan.textContent = sender === "user" ? "You" : "Academic Lens";
+    hdr.appendChild(titleSpan);
+
+    if (sender === "assistant") {
+      const copyBtn = d.createElement("button");
+      copyBtn.className = "al-btn-copy-msg";
+      copyBtn.textContent = "Copy";
+      copyBtn.title = "Copy response to clipboard";
+      copyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const content = msg.querySelector(".al-msg-content")?.textContent || "";
+        this.copyToClipboard(win || pane.ownerDocument?.defaultView, content);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      });
+      hdr.appendChild(copyBtn);
+    }
 
     const cnt = d.createElement("div");
     cnt.className   = "al-msg-content";
@@ -1225,6 +2354,39 @@ Zotero.AcademicLens = {
     area.appendChild(msg);
     area.scrollTop = area.scrollHeight;
     return msg;
+  },
+
+  copyToClipboard(win, text) {
+    if (!text) return false;
+    try {
+      if (win?.navigator?.clipboard?.writeText) {
+        win.navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    try {
+      const clipHelper = Components.classes["@mozilla.org/widget/clipboardhelper;1"]
+        ?.getService(Components.interfaces.nsIClipboardHelper);
+      if (clipHelper) {
+        clipHelper.copyString(text);
+        return true;
+      }
+    } catch (_) {}
+    try {
+      const doc = win?.document || (typeof document !== 'undefined' ? document : null);
+      if (doc) {
+        const ta = doc.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        doc.body.appendChild(ta);
+        ta.select();
+        doc.execCommand("copy");
+        ta.remove();
+        return true;
+      }
+    } catch (_) {}
+    return false;
   },
 
   escapeHtml(str) {
@@ -1243,10 +2405,18 @@ Zotero.AcademicLens = {
 
   setPausedState(root) {
     const dot = root.querySelector("#al-cfg-status-dot");
+    const statusText = root.querySelector("#al-cfg-status-text");
     const badge = root.querySelector("#al-cfg-conn-badge");
     const warning = root.querySelector("#al-cfg-warning");
 
-    if (dot) dot.className = "al-status-dot paused";
+    if (dot) {
+      dot.className = "al-status-dot paused";
+      dot.title = "Connection paused";
+    }
+    if (statusText) {
+      statusText.className = "al-cfg-status-text paused";
+      statusText.textContent = "Paused";
+    }
     if (badge) {
       badge.className = "al-conn-badge paused";
       badge.textContent = "Disconnected (paused)";
@@ -1261,6 +2431,7 @@ Zotero.AcademicLens = {
     }
 
     const dot = root.querySelector("#al-cfg-status-dot");
+    const statusText = root.querySelector("#al-cfg-status-text");
     const badge = root.querySelector("#al-cfg-conn-badge");
     const warning = root.querySelector("#al-cfg-warning");
     const testBtn = root.querySelector("#al-btn-cfg-test");
@@ -1268,11 +2439,18 @@ Zotero.AcademicLens = {
     const modelInput = root.querySelector("#al-input-model");
     const modelSelect = root.querySelector("#al-select-model");
 
-    const rawEp = epInput && typeof epInput.value === "string" ? epInput.value.trim() : (this.endpoint || "");
+    const rawEp = epInput && typeof epInput.value === "string" && epInput.value.trim() ? epInput.value.trim() : (this.endpoint || "");
     const testUrl = (rawEp || this.DEFAULT_ENDPOINT).replace(/\/+$/, "");
-    const targetModel = (modelInput && typeof modelInput.value === "string" ? modelInput.value.trim() : (this.modelName || ""));
+    const targetModel = (modelInput && typeof modelInput.value === "string" && modelInput.value.trim() ? modelInput.value.trim() : (this.modelName || ""));
 
-    if (dot) dot.className = "al-status-dot checking";
+    if (dot) {
+      dot.className = "al-status-dot checking";
+      dot.title = "Checking endpoint…";
+    }
+    if (statusText) {
+      statusText.className = "al-cfg-status-text checking";
+      statusText.textContent = "Checking…";
+    }
     if (badge) {
       badge.className = "al-conn-badge checking";
       badge.textContent = "Checking endpoint…";
@@ -1321,7 +2499,14 @@ Zotero.AcademicLens = {
       const hasFuzzyModel = targetModel && availableModels.some(m => m.toLowerCase().includes(targetModel.toLowerCase()) || targetModel.toLowerCase().includes(m.toLowerCase()));
 
       if (hasExactModel || hasFuzzyModel) {
-        if (dot) dot.className = "al-status-dot connected";
+        if (dot) {
+          dot.className = "al-status-dot connected";
+          dot.title = `Online (${targetModel})`;
+        }
+        if (statusText) {
+          statusText.className = "al-cfg-status-text connected";
+          statusText.textContent = "Online";
+        }
         if (badge) {
           badge.className = "al-conn-badge connected";
           badge.textContent = `✓ Ready (${targetModel})`;
@@ -1329,7 +2514,14 @@ Zotero.AcademicLens = {
         if (warning) warning.classList.remove("visible");
       } else if (availableModels.length > 0) {
         // Endpoint is alive, but requested model is NOT hosted
-        if (dot) dot.className = "al-status-dot model-missing";
+        if (dot) {
+          dot.className = "al-status-dot model-missing";
+          dot.title = `Model "${targetModel}" not found`;
+        }
+        if (statusText) {
+          statusText.className = "al-cfg-status-text model-missing";
+          statusText.textContent = "Model Missing";
+        }
         if (badge) {
           badge.className = "al-conn-badge model-missing";
           badge.textContent = `⚠ Model "${targetModel}" not found`;
@@ -1341,7 +2533,14 @@ Zotero.AcademicLens = {
         }
       } else {
         // Endpoint online but no models loaded
-        if (dot) dot.className = "al-status-dot model-missing";
+        if (dot) {
+          dot.className = "al-status-dot model-missing";
+          dot.title = "Endpoint online, no models";
+        }
+        if (statusText) {
+          statusText.className = "al-cfg-status-text model-missing";
+          statusText.textContent = "No Models";
+        }
         if (badge) {
           badge.className = "al-conn-badge model-missing";
           badge.textContent = "⚠ Endpoint online, no models";
@@ -1352,7 +2551,14 @@ Zotero.AcademicLens = {
         }
       }
     } catch (e) {
-      if (dot) dot.className = "al-status-dot disconnected";
+      if (dot) {
+        dot.className = "al-status-dot disconnected";
+        dot.title = `Offline: ${e.message}`;
+      }
+      if (statusText) {
+        statusText.className = "al-cfg-status-text disconnected";
+        statusText.textContent = "Offline";
+      }
       if (badge) {
         badge.className = "al-conn-badge disconnected";
         badge.textContent = "✗ Endpoint not reachable";
@@ -1388,22 +2594,111 @@ Zotero.AcademicLens = {
     }
   },
 
+  updateAllSidebars(skipRoot = null) {
+    this.loadSettings();
+
+    const windowsToUpdate = [];
+    if (this.windows) {
+      for (const [win] of this.windows) {
+        if (win && !win.closed && win.document) {
+          windowsToUpdate.push(win);
+        }
+      }
+    }
+    try {
+      const mainWin = (typeof Zotero !== "undefined" && Zotero.getMainWindow) ? Zotero.getMainWindow() : null;
+      if (mainWin && !windowsToUpdate.includes(mainWin) && !mainWin.closed && mainWin.document) {
+        windowsToUpdate.push(mainWin);
+      }
+    } catch (_) {}
+
+    for (const win of windowsToUpdate) {
+      try {
+        const roots = win.document.querySelectorAll(".al-html-root");
+        roots.forEach(root => {
+          if (root === skipRoot) return;
+
+          // Sync input fields
+          const epInput = root.querySelector("#al-input-endpoint");
+          const modelInput = root.querySelector("#al-input-model");
+          if (epInput && epInput !== win.document.activeElement) {
+            epInput.value = this.endpoint;
+          }
+          if (modelInput && modelInput !== win.document.activeElement) {
+            modelInput.value = this.modelName;
+          }
+
+          // Test endpoint and update status
+          if (this.connectionEnabled) {
+            this.testEndpoint(root);
+          } else {
+            this.setPausedState(root);
+          }
+        });
+      } catch (err) {
+        Zotero.debug("[AcademicLens] Error updating sidebar: " + err);
+      }
+    }
+  },
+
+  registerPrefObservers() {
+    try {
+      if (typeof Zotero !== "undefined" && Zotero.Prefs && typeof Zotero.Prefs.registerObserver === "function") {
+        const prefsToWatch = [
+          "extensions.academic-lens.endpoint",
+          "extensions.academic-lens.model",
+          "extensions.academic-lens.maxTokens"
+        ];
+        prefsToWatch.forEach(pref => {
+          const sym = Zotero.Prefs.registerObserver(pref, () => {
+            Zotero.debug("[AcademicLens] Observed preference change: " + pref);
+            this.updateAllSidebars();
+          }, true);
+          if (sym) {
+            this._prefObservers.push(sym);
+          }
+        });
+      }
+    } catch (e) {
+      Zotero.debug("[AcademicLens] Failed to register pref observers: " + e);
+    }
+  },
+
+  unregisterPrefObservers() {
+    try {
+      if (typeof Zotero !== "undefined" && Zotero.Prefs && typeof Zotero.Prefs.unregisterObserver === "function") {
+        this._prefObservers.forEach(sym => {
+          try {
+            Zotero.Prefs.unregisterObserver(sym);
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+    this._prefObservers = [];
+  },
+
   loadSettings() {
     try {
       const ep    = Zotero.Prefs.get("extensions.academic-lens.endpoint");
       const model = Zotero.Prefs.get("extensions.academic-lens.model");
       const tok   = Zotero.Prefs.get("extensions.academic-lens.maxTokens");
+      const absOnly = Zotero.Prefs.get("extensions.academic-lens.abstractOnly");
       if (ep)    this.endpoint   = ep;
+      else if (!this.endpoint) this.endpoint = this.DEFAULT_ENDPOINT;
       if (model) this.modelName  = model;
+      else if (!this.modelName) this.modelName = this.DEFAULT_MODEL;
       if (tok)   this.maxTokens  = parseInt(tok, 10) || this.DEFAULT_MAX_TOKENS;
+      else if (!this.maxTokens) this.maxTokens = this.DEFAULT_MAX_TOKENS;
+      if (typeof absOnly === "boolean") this.abstractOnly = absOnly;
     } catch (_) {}
   },
 
   saveSettings() {
     try {
-      Zotero.Prefs.set("extensions.academic-lens.endpoint",   this.endpoint);
-      Zotero.Prefs.set("extensions.academic-lens.model",      this.modelName);
-      Zotero.Prefs.set("extensions.academic-lens.maxTokens",  String(this.maxTokens));
+      Zotero.Prefs.set("extensions.academic-lens.endpoint",     this.endpoint);
+      Zotero.Prefs.set("extensions.academic-lens.model",        this.modelName);
+      Zotero.Prefs.set("extensions.academic-lens.maxTokens",    String(this.maxTokens));
+      Zotero.Prefs.set("extensions.academic-lens.abstractOnly", Boolean(this.abstractOnly));
       Zotero.debug("[AcademicLens] Settings saved: " + this.endpoint + " / " + this.modelName);
     } catch (_) {}
   },
