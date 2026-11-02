@@ -3,8 +3,8 @@
     "academic-lens@ut.ee": {
       "updates": [
         {
-          "version": "1.1.8",
-          "update_link": "https://github.com/wprimett/academic-lens-zotero/releases/download/1.1.8-alpha/academic-lens.xpi",
+          "version": "1.1.9-alpha",
+          "update_link": "https://github.com/wprimett/academic-lens-zotero/releases/download/1.1.9-alpha/academic-lens.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",
