@@ -360,7 +360,7 @@ Zotero.AcademicLens = {
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
             <button class="al-btn-toggle-conn disconnect" id="al-btn-toggle-conn" title="Toggle connection status">Disconnect</button>
-            <button class="al-btn al-btn-secondary al-btn-xs" id="al-btn-cfg-test" title="Test endpoint &amp; model">⚡ Test</button>
+            <button class="al-btn al-btn-secondary al-btn-xs" id="al-btn-cfg-test" title="Test endpoint &amp; model">Test</button>
           </div>
         </div>
 
@@ -2568,7 +2568,7 @@ Zotero.AcademicLens = {
         warning.classList.add("visible");
       }
     } finally {
-      if (testBtn) testBtn.textContent = "⚡ Test";
+      if (testBtn) testBtn.textContent = "Test";
     }
   },
 
@@ -2876,7 +2876,7 @@ Zotero.AcademicLensPrefs = {
     } catch (e) {
       this._status(statusEl, "error", "✗ Unreachable: " + e.message);
     } finally {
-      if (testBtn) { testBtn.textContent = "⚡ Test"; testBtn.disabled = false; }
+      if (testBtn) { testBtn.textContent = "Test"; testBtn.disabled = false; }
     }
   },
 
