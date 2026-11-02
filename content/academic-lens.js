@@ -22,13 +22,13 @@ if (typeof Zotero === "undefined") {
 
 Zotero.AcademicLens = {
   // Configuration
-  DEFAULT_ENDPOINT: "http://77.42.92.200:18181/",
+  DEFAULT_ENDPOINT: "http://127.0.0.1:8080/",
   DEFAULT_MODEL: "Llama-3.2-3B-Instruct-Q4_K_M",
   FALLBACK_MODEL: "Qwen3.5-4B-Q4_K_S",
   DEFAULT_MAX_TOKENS: 800,
   DEFAULT_MAX_CONTEXT_CHARS: 3200,
 
-  endpoint: "http://77.42.92.200:18181/",
+  endpoint: "http://127.0.0.1:8080/",
   modelName: "Llama-3.2-3B-Instruct-Q4_K_M",
   maxTokens: 800,
   abstractOnly: false,
@@ -377,7 +377,7 @@ Zotero.AcademicLens = {
           <div class="al-config-row">
             <input type="text" class="al-config-input" id="al-input-endpoint"
                    value="${this.escapeHtml(this.endpoint)}"
-                   placeholder="Endpoint (e.g. http://77.42.92.200:18181/)"
+                   placeholder="Endpoint (e.g. http://127.0.0.1:8080/)"
                    title="OpenAI-compatible server URL" />
           </div>
         </div>
