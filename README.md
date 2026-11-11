@@ -4,8 +4,12 @@
 
 ---
 
-## 1. Documentation & Terminology Guide
+<img src="https://academiclens.ai/zotero-addon/docs/screenshot-1.png" width="50%" alt="app screenshot">
 
+## 1. Overview
+
+Academic Lens is a data-driven research assistant, designed to navigate and reason through a corpus of materials around a specific research topic. The assistant responds to the researcher's questions or keyword searches, and aims to provide relevant citations for every answer. 
+Unlike other chatbots, this tool does not support creative writing or text editing tasks. The system uses a Closed-World architecture for evidence-based enquiry: responses are based on the provided corpus. If the answer is not contained within the source materials, the system is designed to state its limitations rather than speculate.
 
 ## 2. Features
 
@@ -19,7 +23,6 @@
   - Formats bullet points with clean `•` bullets.
   - Extracts and renders `|CONFIDENCE|score|` badges (High / Medium / Low).
   - Handles UTF-8 mojibake cleanups.
-- **Zero Heavy Dependencies:** No external npm packages, Supabase, or cloud dependencies required.
 
 ---
 
@@ -39,43 +42,28 @@ To run `llama3.2:3b` (`Llama-3.2-3B-Instruct-Q4_K_M`, ~2.0 GB 4-bit quantized) l
 
 ## 4. Installation in Zotero 7
 
-### Method A: Install the pre-built `.xpi` (Easiest)
+The latest stable version of the addon and endpoint can be found in the [releases](https://github.com/wprimett/academic-lens-zotero/releases)
+
+### Install the pre-built `.xpi` (Easiest)
 1. Open **Zotero 7**.
 2. Go to **Tools** → **Plugins** (or **Add-ons**).
 3. Click the **Gear icon (⚙)** in the top right corner and select **"Install Add-on From File..."**.
 4. Select `academic-lens.xpi` (located in this directory or the root directory).
 5. Click **Install**, then restart Zotero if prompted.
 
-### Method B: Developer Mode (Live Editing)
-1. Open your Zotero profile folder:
-   - Linux: `~/.zotero/zotero/<profile-dir>/extensions/`
-   - macOS: `~/Library/Application Support/Zotero/Profiles/<profile-dir>/extensions/`
-   - Windows: `%APPDATA%\Zotero\Zotero\Profiles\<profile-dir>\extensions\`
-2. In the `extensions/` directory, create a text file named:
-   ```
-   academic-lens@ut.ee
-   ```
-3. Inside that file, write the absolute path to this folder:
-   ```
-   /var/www/RAG-Qwen3VL-Test/academic-lens-zotero
-   ```
-4. Restart Zotero.
+### AcademicLens endpoint
+
+Academic Lens is intended to work with locally hosted models which can run on consumer-level hardware (i.e. the computer you are already using should already be enough, see hardware requirements). An endpoint is required for the application to send requests to the model. These requests include prompts, files and embeddings.
+
+The `AcademicLensEndpoint` executable is recommended as a click-and-play background application to serve the model locally. This needs to run separately alongside to use Zotero + AcademicLens plugin and should be closed when not in use.
 
 ---
 
 ## 5. Usage
 
-### AcademicLens Endpoint
-
-Academic Lens is intended to work with locally hosted models which can run on consumer-level hardware (i.e. the computer you are already using may already be enough). An endpoint is required for the application to send requests to the model. These requests include prompts, files and embeddings.
-
-The `AcademicLensEndpoint` executable is recommended as a click-and-play background application to serve the model locally. This needs to run separately alongside to use Zotero + AcademicLens plugin and should be closed when not in use.
-
 1. **Ensure your endpoint is running:**
-   ```bash
-   # Default endpoint: http://77.42.92.200:18181/
-   # Default model: Llama-3.2-3B-Instruct-Q4_K_M
-   ```
+    - Launch the AcademicLensEndpoint app from the Windows start menu or MacOS applications folder
+
 2. **Open Academic Lens:**
    - Click the **Academic Lens** toggle button in the Zotero tabs toolbar (next to the Sync button).
    - The sidebar opens on the right side of the library pane.
@@ -91,7 +79,27 @@ The `AcademicLensEndpoint` executable is recommended as a click-and-play backgro
 
 ---
 
-## 6. Rebuilding the Add-on
+## 6. Developer
+
+### Custom endpoints
+The default endpoint service is build around the [llamafile](https://github.com/mozilla-ai/llamafile) project by mozilla.ai. Custom endpoints can be configured by following the instructions on the llamafile repository. Academic Lens can also work with endpoints hosted using Ollama.
+
+### Live editing installation
+1. Open your Zotero profile folder:
+   - Linux: `~/.zotero/zotero/<profile-dir>/extensions/`
+   - macOS: `~/Library/Application Support/Zotero/Profiles/<profile-dir>/extensions/`
+   - Windows: `%APPDATA%\Zotero\Zotero\Profiles\<profile-dir>\extensions\`
+2. In the `extensions/` directory, create a text file named:
+   ```
+   academic-lens@ut.ee
+   ```
+3. Inside that file, write the absolute path to this folder:
+   ```
+   /var/www/RAG-Qwen3VL-Test/academic-lens-zotero
+   ```
+4. Restart Zotero.
+
+### Rebuilding the addon
 
 To pack the add-on into a new `.xpi` after making code changes:
 ```bash
