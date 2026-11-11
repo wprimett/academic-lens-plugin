@@ -6,12 +6,12 @@
 
 <img src="https://academiclens.ai/zotero-addon/docs/screenshot-1.png" width="50%" alt="app screenshot">
 
-## 1. Overview
+## Overview
 
 Academic Lens is a data-driven research assistant, designed to navigate and reason through a corpus of materials around a specific research topic. The assistant responds to the researcher's questions or keyword searches, and aims to provide relevant citations for every answer. 
 Unlike other chatbots, this tool does not support creative writing or text editing tasks. The system uses a Closed-World architecture for evidence-based enquiry: responses are based on the provided corpus. If the answer is not contained within the source materials, the system is designed to state its limitations rather than speculate.
 
-## 2. Features
+## Features
 
 - **Private & Configurable:** Communicates directly with your OpenAI-compatible endpoint (`http://127.0.0.1:18181/v1/chat/completions`), keeping your library data private.
 - **Drag-and-Drop Ingestion:** Drag articles directly from your Zotero library table into the Academic Lens sidebar.
@@ -26,21 +26,7 @@ Unlike other chatbots, this tool does not support creative writing or text editi
 
 ---
 
-## 3. Minimum System Requirements (Local LLM: `llama3.2:3b`)
-
-To run `llama3.2:3b` (`Llama-3.2-3B-Instruct-Q4_K_M`, ~2.0 GB 4-bit quantized) locally alongside Zotero 7:
-
-| Component | Minimum Requirement (CPU / Integrated) |
-| :--- | :--- |
-| **System RAM** | **8 GB RAM** (~3 GB free for model weights + KV cache) |
-| **GPU / VRAM** | Not required (runs on CPU) |
-| **CPU** | 4-core modern x86_64 (AVX2 support) or ARM64 |
-| **Disk Space** | **3 GB free** (~2.0 GB for `llama3.2:3b` weights + runtime) |
-| **Software** | Zotero 7.0+ |
-
----
-
-## 4. Installation in Zotero 7
+## Installation in Zotero 7
 
 The latest stable version of the addon and endpoint can be found in the [releases](https://github.com/wprimett/academic-lens-zotero/releases)
 
@@ -59,7 +45,7 @@ The `AcademicLensEndpoint` executable is recommended as a click-and-play backgro
 
 ---
 
-## 5. Usage
+## Usage
 
 1. **Ensure your endpoint is running:**
     - Launch the AcademicLensEndpoint app from the Windows start menu or MacOS applications folder
@@ -79,7 +65,23 @@ The `AcademicLensEndpoint` executable is recommended as a click-and-play backgro
 
 ---
 
-## 6. Developer
+## Minimum System Requirements (Local LLM: `llama3.2:3b`)
+
+To run `llama3.2:3b` (`Llama-3.2-3B-Instruct-Q4_K_M`, ~2.0 GB 4-bit quantized) locally alongside Zotero 7:
+
+| Component | Minimum Requirement (CPU / Integrated) |
+| :--- | :--- |
+| **System RAM** | **8 GB RAM** (~3 GB free for model weights + KV cache) |
+| **GPU / VRAM** | Not required (runs on CPU) |
+| **CPU** | 4-core modern x86_64 (AVX2 support) or ARM64 |
+| **Disk Space** | **3 GB free** (~2.0 GB for `llama3.2:3b` weights + runtime) |
+| **Software** | Zotero 7.0+ |
+
+---
+
+## Run from source
+
+Academic Lens can be run from source and customised, which requires the addon to be compiled manually.   
 
 ### Custom endpoints
 The default endpoint service is build around the [llamafile](https://github.com/mozilla-ai/llamafile) project by mozilla.ai. Custom endpoints can be configured by following the instructions on the llamafile repository. Academic Lens can also work with endpoints hosted using Ollama.
@@ -106,3 +108,14 @@ To pack the add-on into a new `.xpi` after making code changes:
 node build.mjs
 ```
 This produces `academic-lens.xpi` using pure built-in Node.js.
+
+## Contact
+
+Have any questions? feel free to write to our team:
+
+- **Project Managment**: mattia.bellini [at] ut [dot] ee
+- **Research & Development**: primett [at] ut [dot] ee
+
+<img src="https://academiclens.ai/static/eu_logos.jpg" width="50%" alt="app screenshot">
+
+Co-financed by the EU.
