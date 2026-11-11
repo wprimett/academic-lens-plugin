@@ -337,16 +337,16 @@ Zotero.AcademicLens = {
 
   getSidebarHTML() {
     return `
-      <div class="al-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#22222a;border-bottom:1px solid #33333f;flex-shrink:0;">
+      <div class="al-header" style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:#1c1c22;border-bottom:1px solid #292932;flex-shrink:0;">
         <div class="al-title-area" style="display:flex;align-items:center;gap:8px;min-width:0;">
           <img class="al-logo" src="chrome://academic-lens/content/icons/icon.png" alt="Logo" />
           <h3 class="al-title" style="margin:0;white-space:nowrap;">Academic Lens</h3>
         </div>
         <div class="al-header-actions" style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
           <span id="al-btn-maximize" class="al-header-btn" role="button" tabindex="0" title="Maximise Panel" aria-label="Maximise Panel" aria-pressed="false"
-            style="display:inline-flex;align-items:center;justify-content:center;gap:4px;height:26px;min-height:26px;padding:0 10px;background:#282834;border:1px solid #6c5ce7;border-radius:6px;color:#e0e0f0;font-size:11.5px;font-weight:600;cursor:pointer;user-select:none;line-height:1;white-space:nowrap;flex-shrink:0;box-sizing:border-box;">${this.getMaximizeIcon(false)}</span>
+            style="display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;min-height:24px;padding:0 8px;background:#26262f;border:1px solid #343440;border-radius:5px;color:#a0a0b0;font-size:11.5px;font-weight:500;cursor:pointer;user-select:none;line-height:1;white-space:nowrap;flex-shrink:0;box-sizing:border-box;">${this.getMaximizeIcon(false)}</span>
           <span id="al-btn-close" class="al-header-btn" role="button" tabindex="0" title="Close Sidebar" aria-label="Close"
-            style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;min-width:26px;min-height:26px;padding:0;background:#282834;border:1px solid #4a4a5e;border-radius:6px;color:#e0e0f0;font-size:14px;font-weight:bold;cursor:pointer;user-select:none;line-height:1;flex-shrink:0;box-sizing:border-box;">✕</span>
+            style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;min-width:24px;min-height:24px;padding:0;background:#26262f;border:1px solid #343440;border-radius:5px;color:#a0a0b0;font-size:12.5px;font-weight:500;cursor:pointer;user-select:none;line-height:1;flex-shrink:0;box-sizing:border-box;">✕</span>
         </div>
       </div>
 
@@ -355,7 +355,7 @@ Zotero.AcademicLens = {
         <div class="al-config-header">
           <div class="al-config-title">
             <span class="al-status-dot checking" id="al-cfg-status-dot" title="Checking status…"></span>
-            <span>Endpoint Status:</span>
+            <span>Endpoint</span>
             <span class="al-cfg-status-text checking" id="al-cfg-status-text">Checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -397,14 +397,13 @@ Zotero.AcademicLens = {
             <span class="al-btn-dev-toggle ${this.abstractOnly ? "active" : ""}" id="al-btn-abstract-only"
               role="button" tabindex="0"
               aria-pressed="${this.abstractOnly ? "true" : "false"}"
-              style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;border:1px solid ${this.abstractOnly ? "rgba(250,173,20,0.5)" : "rgba(82,214,138,0.4)"};background:${this.abstractOnly ? "rgba(250,173,20,0.16)" : "rgba(82,214,138,0.14)"};color:${this.abstractOnly ? "#ffc53d" : "#52d68a"};"
-              title="Developer toggle: when active, queries only use item abstracts and ignore extracted PDF text">${this.abstractOnly ? "🧪 Abstract-Only: ON" : "📄 Mode: PDF + Abstract"}</span>
-            <button class="al-btn al-btn-secondary al-btn-xs" id="al-btn-clear-sources" title="Clear all selected sources">✕ Clear</button>
+              style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:500;cursor:pointer;user-select:none;white-space:nowrap;border:1px solid ${this.abstractOnly ? "rgba(196,154,69,0.35)" : "#343440"};background:${this.abstractOnly ? "rgba(196,154,69,0.12)" : "#26262f"};color:${this.abstractOnly ? "#d4b068" : "#a0a0b0"};"
+              title="Developer toggle: when active, queries only use item abstracts and ignore extracted PDF text">${this.abstractOnly ? "Abstract-Only: ON" : "Mode: PDF + Abstract"}</span>
+            <button class="al-btn al-btn-secondary al-btn-xs" id="al-btn-clear-sources" title="Clear all selected sources">Clear</button>
             <button class="al-btn al-btn-secondary al-btn-sm" id="al-btn-add-selected">+ Add Selected</button>
           </div>
         </div>
         <div class="al-drop-zone" id="al-drop-zone">
-          <span class="al-drop-icon">📄</span>
           Drag articles from library here (auto-detects PDF &amp; converts to .txt)
         </div>
         <div class="al-doc-list" id="al-doc-list"></div>
@@ -415,17 +414,16 @@ Zotero.AcademicLens = {
           <div class="al-msg-header">
             <span>Academic Lens</span>
           </div>
-          <div class="al-msg-content">Welcome to <b>Academic Lens</b>. Drag or select papers from your library to query specific sources, or simply type a keyword or question below with no papers selected to automatically find and analyze <b>2–5 matching papers</b> from your library.</div>
+          <div class="al-msg-content">Welcome to <b>Academic Lens</b>. Drag or select papers from your library to query specific sources, or enter a keyword or question below with no papers selected to automatically find and analyze <b>2–5 matching papers</b> from your library.</div>
         </div>
       </div>
 
       <!-- ── Persistent Quick Prompts Toolbar ────────────────────── -->
-      <div class="al-quick-prompts" id="al-quick-prompts" style="display:flex;flex-direction:column;gap:6px;padding:8px 12px;background:#1e1e24;border-top:1px solid #33333e;flex-shrink:0;">
-        <div class="al-quick-title" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#8d77ca;user-select:none;">Quick Prompts:</div>
+      <div class="al-quick-prompts" id="al-quick-prompts" style="display:flex;flex-direction:column;gap:5px;padding:7px 14px;background:#1c1c22;border-top:1px solid #292932;flex-shrink:0;">
         <div class="al-quick-list" style="display:flex;flex-wrap:wrap;gap:6px;width:100%;">
-          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Summarize the key findings of these papers." style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">💡 Summarize findings</span>
-          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Compare the methodologies used across these papers." style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">🔬 Compare methods</span>
-          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="What are the main contributions of these papers?" style="display:inline-flex;align-items:center;background:#282834;border:1px solid #4a4a5e;border-radius:12px;color:#e0e0f0;font-size:11px;padding:4px 10px;cursor:pointer;user-select:none;line-height:1.3;white-space:nowrap;">❓ Key contributions</span>
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Summarize the key findings of these papers." style="display:inline-flex;align-items:center;background:#26262f;border:1px solid #343440;border-radius:5px;color:#a0a0b0;font-size:11px;padding:3px 9px;cursor:pointer;user-select:none;line-height:1.35;white-space:nowrap;">Summarize findings</span>
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="Compare the methodologies used across these papers." style="display:inline-flex;align-items:center;background:#26262f;border:1px solid #343440;border-radius:5px;color:#a0a0b0;font-size:11px;padding:3px 9px;cursor:pointer;user-select:none;line-height:1.35;white-space:nowrap;">Compare methods</span>
+          <span class="al-quick-btn" role="button" tabindex="0" data-prompt="What are the main contributions of these papers?" style="display:inline-flex;align-items:center;background:#26262f;border:1px solid #343440;border-radius:5px;color:#a0a0b0;font-size:11px;padding:3px 9px;cursor:pointer;user-select:none;line-height:1.35;white-space:nowrap;">Key contributions</span>
         </div>
       </div>
 
@@ -961,9 +959,9 @@ Zotero.AcademicLens = {
           maxBtn.setAttribute("aria-label", "Restore Panel Size");
           maxBtn.setAttribute("aria-pressed", "true");
           maxBtn.classList.add("active");
-          maxBtn.style.background = "rgba(141, 119, 202, 0.28)";
-          maxBtn.style.borderColor = "#9b87d6";
-          maxBtn.style.color = "#ffffff";
+          maxBtn.style.background = "rgba(124, 108, 196, 0.18)";
+          maxBtn.style.borderColor = "rgba(124, 108, 196, 0.45)";
+          maxBtn.style.color = "#e4dff7";
         }
 
         // If an ancestor has `contain` or `transform` that traps fixed positioning,
@@ -1003,9 +1001,9 @@ Zotero.AcademicLens = {
           maxBtn.setAttribute("aria-label", "Maximise Panel");
           maxBtn.setAttribute("aria-pressed", "false");
           maxBtn.classList.remove("active");
-          maxBtn.style.background = "#282834";
-          maxBtn.style.borderColor = "#6c5ce7";
-          maxBtn.style.color = "#e0e0f0";
+          maxBtn.style.background = "#26262f";
+          maxBtn.style.borderColor = "#343440";
+          maxBtn.style.color = "#a0a0b0";
         }
       }
     });
@@ -1668,10 +1666,10 @@ Zotero.AcademicLens = {
         if (devToggleBtn) {
           devToggleBtn.classList.toggle("active", Boolean(this.abstractOnly));
           devToggleBtn.setAttribute("aria-pressed", this.abstractOnly ? "true" : "false");
-          devToggleBtn.textContent = this.abstractOnly ? "🧪 Abstract-Only: ON" : "📄 Mode: PDF + Abstract";
-          devToggleBtn.style.borderColor = this.abstractOnly ? "rgba(250,173,20,0.5)" : "rgba(82,214,138,0.4)";
-          devToggleBtn.style.background = this.abstractOnly ? "rgba(250,173,20,0.16)" : "rgba(82,214,138,0.14)";
-          devToggleBtn.style.color = this.abstractOnly ? "#ffc53d" : "#52d68a";
+          devToggleBtn.textContent = this.abstractOnly ? "Abstract-Only: ON" : "Mode: PDF + Abstract";
+          devToggleBtn.style.borderColor = this.abstractOnly ? "rgba(196,154,69,0.35)" : "#343440";
+          devToggleBtn.style.background = this.abstractOnly ? "rgba(196,154,69,0.12)" : "#26262f";
+          devToggleBtn.style.color = this.abstractOnly ? "#d4b068" : "#a0a0b0";
         }
 
         if (!listContainer) return;
@@ -1685,17 +1683,17 @@ Zotero.AcademicLens = {
 
           let badgeHtml = "";
           if (doc.isExtracting) {
-            badgeHtml = `<span class="al-doc-source-badge extracting" title="Extracting text from attached PDF…">⏳ PDF→TXT…</span>`;
+            badgeHtml = `<span class="al-doc-source-badge extracting" title="Extracting text from attached PDF…">Extracting PDF…</span>`;
           } else if (doc.fullText && doc.fullText.length > 0) {
             const charK = Math.max(1, Math.round(doc.fullText.length / 1000));
             if (this.abstractOnly) {
-              badgeHtml = `<span class="al-doc-source-badge abstract-dev" title="Abstract-Only developer mode active (PDF .txt extracted: ${charK}k chars, ignored in query)">🧪 Abstract Only (PDF ${charK}k)</span>`;
+              badgeHtml = `<span class="al-doc-source-badge abstract-dev" title="Abstract-Only developer mode active (PDF .txt extracted: ${charK}k chars, ignored in query)">Abstract Only (PDF ${charK}k)</span>`;
             } else {
               const pathHint = doc.txtPath ? `Saved: ${doc.txtPath}` : "Extracted from attached PDF";
-              badgeHtml = `<span class="al-doc-source-badge pdf-ready" title="${this.escapeHtml(pathHint)}">📄 PDF .txt (${charK}k chars)</span>`;
+              badgeHtml = `<span class="al-doc-source-badge pdf-ready" title="${this.escapeHtml(pathHint)}">PDF .txt (${charK}k chars)</span>`;
             }
           } else {
-            badgeHtml = `<span class="al-doc-source-badge no-pdf" title="No PDF attachment detected; using abstract only">📝 Abstract Only</span>`;
+            badgeHtml = `<span class="al-doc-source-badge no-pdf" title="No PDF attachment detected; using abstract only">Abstract Only</span>`;
           }
 
           chip.innerHTML = `
@@ -1706,7 +1704,7 @@ Zotero.AcademicLens = {
               </div>
               <div class="al-doc-title" title="${this.escapeHtml(doc.title)}">${this.escapeHtml(doc.title)}</div>
             </div>
-            <span class="al-doc-remove" role="button" tabindex="0" title="Remove source" aria-label="Remove source" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:50%;background:#e05252;border:1px solid #ff7875;color:#ffffff;font-size:12px;font-weight:bold;cursor:pointer;flex-shrink:0;user-select:none;margin-left:8px;line-height:1;text-align:center;">✕</span>
+            <span class="al-doc-remove" role="button" tabindex="0" title="Remove source" aria-label="Remove source" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-width:20px;min-height:20px;border-radius:4px;background:transparent;border:1px solid transparent;color:#767686;font-size:11px;font-weight:500;cursor:pointer;flex-shrink:0;user-select:none;margin-left:6px;line-height:1;text-align:center;">✕</span>
           `;
           const rmBtn = chip.querySelector(".al-doc-remove");
           rmBtn?.addEventListener("click", (e) => {
@@ -1909,20 +1907,20 @@ Zotero.AcademicLens = {
 
     const card = doc.createElement("div");
     card.className = "al-matched-papers-card";
-    card.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:10px;padding:8px 10px;background:#252532;border:1px solid rgba(141,119,202,0.35);border-radius:6px;";
+    card.style.cssText = "display:flex;flex-direction:column;gap:6px;margin-bottom:10px;padding:8px 10px;background:#202028;border:1px solid #2e2e3a;border-radius:5px;";
 
     const hdr = doc.createElement("div");
     hdr.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;";
 
     const titleEl = doc.createElement("span");
-    titleEl.style.cssText = "font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#b5a3ea;";
-    titleEl.textContent = `🔍 Matched Library Papers (${matchedDocs.length})`;
+    titleEl.style.cssText = "font-size:10.5px;font-weight:500;color:#a0a0b0;font-variant-numeric:tabular-nums;";
+    titleEl.textContent = `Matched Library Papers (${matchedDocs.length})`;
     hdr.appendChild(titleEl);
 
     const addAllBtn = doc.createElement("span");
     addAllBtn.setAttribute("role", "button");
     addAllBtn.setAttribute("tabindex", "0");
-    addAllBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 7px;background:#2f2c44;border:1px solid #6c5ce7;border-radius:4px;color:#e0e0f0;font-size:10px;font-weight:600;cursor:pointer;user-select:none;";
+    addAllBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 7px;background:#26262f;border:1px solid #343440;border-radius:4px;color:#b8aee0;font-size:10px;font-weight:500;cursor:pointer;user-select:none;";
     addAllBtn.textContent = "+ Pin All to Sources";
     addAllBtn.title = "Add all matched papers to Selected Sources for follow-up questions";
     addAllBtn.addEventListener("click", (e) => {
@@ -1933,7 +1931,7 @@ Zotero.AcademicLens = {
         }
       }
       this.renderDocumentChips(win);
-      addAllBtn.textContent = "✓ Pinned";
+      addAllBtn.textContent = "Pinned";
     });
     hdr.appendChild(addAllBtn);
     card.appendChild(hdr);
@@ -1944,7 +1942,7 @@ Zotero.AcademicLens = {
     matchedDocs.forEach((d, idx) => {
       const row = doc.createElement("div");
       row.className = "al-matched-paper-row";
-      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;background:#1c1c26;border:1px solid #353548;border-left:3px solid #8d77ca;border-radius:4px;cursor:pointer;";
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px;background:#191920;border:1px solid #292932;border-radius:4px;cursor:pointer;";
       row.title = `Click to select "${d.title}" in Zotero`;
 
       const info = doc.createElement("div");
@@ -1954,7 +1952,7 @@ Zotero.AcademicLens = {
       topLine.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap;";
 
       const citeSpan = doc.createElement("span");
-      citeSpan.style.cssText = "font-size:11px;font-weight:700;color:#ab9ad6;";
+      citeSpan.style.cssText = "font-size:11px;font-weight:600;color:#b8aee0;font-variant-numeric:tabular-nums;";
       citeSpan.textContent = `[[${idx + 1}]] ${d.display}`;
       topLine.appendChild(citeSpan);
 
@@ -1962,13 +1960,13 @@ Zotero.AcademicLens = {
       const hasPdfTxt = Boolean(d.fullText && d.fullText.trim().length > 0);
       badge.className = "al-doc-source-badge " + (hasPdfTxt ? (this.abstractOnly ? "abstract-dev" : "pdf-ready") : "no-pdf");
       badge.textContent = hasPdfTxt
-        ? (this.abstractOnly ? "🧪 Abstract Only" : "📄 PDF .txt")
-        : "📝 Abstract";
+        ? (this.abstractOnly ? "Abstract Only" : "PDF .txt")
+        : "Abstract";
       topLine.appendChild(badge);
       info.appendChild(topLine);
 
       const paperTitle = doc.createElement("div");
-      paperTitle.style.cssText = "font-size:11px;color:#d0d0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      paperTitle.style.cssText = "font-size:11px;color:#a0a0b0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       paperTitle.textContent = d.title;
       info.appendChild(paperTitle);
 
@@ -1977,7 +1975,7 @@ Zotero.AcademicLens = {
       const addOneBtn = doc.createElement("span");
       addOneBtn.setAttribute("role", "button");
       addOneBtn.setAttribute("tabindex", "0");
-      addOneBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 6px;background:#282834;border:1px solid #4a4a5e;border-radius:4px;color:#ccc;font-size:10px;font-weight:600;cursor:pointer;user-select:none;flex-shrink:0;";
+      addOneBtn.style.cssText = "display:inline-flex;align-items:center;padding:2px 6px;background:#26262f;border:1px solid #343440;border-radius:4px;color:#a0a0b0;font-size:10px;font-weight:500;cursor:pointer;user-select:none;flex-shrink:0;";
       addOneBtn.textContent = "+ Pin";
       addOneBtn.title = "Add this paper to Selected Sources";
       addOneBtn.addEventListener("click", (e) => {
@@ -1986,7 +1984,7 @@ Zotero.AcademicLens = {
           this.selectedDocuments.push({ ...d });
           this.renderDocumentChips(win);
         }
-        addOneBtn.textContent = "✓";
+        addOneBtn.textContent = "Pinned";
       });
       row.appendChild(addOneBtn);
 
@@ -2056,7 +2054,7 @@ Zotero.AcademicLens = {
     try {
       if (isAutoSearch) {
         if (contentEl) {
-          contentEl.textContent = "🔍 Searching your Zotero library for 2–5 relevant papers…";
+          contentEl.textContent = "Searching your Zotero library for 2–5 relevant papers…";
         }
         queryDocs = await this.searchLibraryPapers(query, win, 2, 5);
         if (!queryDocs || queryDocs.length === 0) {
@@ -2290,7 +2288,7 @@ Zotero.AcademicLens = {
       srcList.className = "al-sources-list";
       const title = docToUse.createElement("div");
       title.className = "al-sources-title";
-      title.textContent = "SOURCES:";
+      title.textContent = "Sources";
       srcList.appendChild(title);
 
       const tagsWrapper = docToUse.createElement("div");
