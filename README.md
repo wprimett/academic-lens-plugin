@@ -23,7 +23,21 @@
 
 ---
 
-## 3. Installation in Zotero 7
+## 3. Minimum System Requirements (Local LLM: `llama3.2:3b`)
+
+To run `llama3.2:3b` (`Llama-3.2-3B-Instruct-Q4_K_M`, ~2.0 GB 4-bit quantized) locally alongside Zotero 7:
+
+| Component | Minimum Requirement (CPU / Integrated) |
+| :--- | :--- |
+| **System RAM** | **8 GB RAM** (~3 GB free for model weights + KV cache) |
+| **GPU / VRAM** | Not required (runs on CPU) |
+| **CPU** | 4-core modern x86_64 (AVX2 support) or ARM64 |
+| **Disk Space** | **3 GB free** (~2.0 GB for `llama3.2:3b` weights + runtime) |
+| **Software** | Zotero 7.0+ |
+
+---
+
+## 4. Installation in Zotero 7
 
 ### Method A: Install the pre-built `.xpi` (Easiest)
 1. Open **Zotero 7**.
@@ -49,7 +63,13 @@
 
 ---
 
-## 4. Usage
+## 5. Usage
+
+### AcademicLens Endpoint
+
+Academic Lens is intended to work with locally hosted models which can run on consumer-level hardware (i.e. the computer you are already using may already be enough). An endpoint is required for the application to send requests to the model. These requests include prompts, files and embeddings.
+
+The `AcademicLensEndpoint` executable is recommended as a click-and-play background application to serve the model locally. This needs to run separately alongside to use Zotero + AcademicLens plugin and should be closed when not in use.
 
 1. **Ensure your endpoint is running:**
    ```bash
@@ -71,7 +91,7 @@
 
 ---
 
-## 5. Rebuilding the Add-on
+## 6. Rebuilding the Add-on
 
 To pack the add-on into a new `.xpi` after making code changes:
 ```bash
