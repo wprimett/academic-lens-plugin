@@ -1,6 +1,6 @@
-# Academic Lens - Zotero 7 Add-on
+# Academic Lens
 
- A lightweight, local-first Zotero 7 add-on that enables evidence-grounded chat over selected research documents over a self-hosted model.
+ A lightweight, local-first Zotero add-on that enables evidence-grounded chat over selected research documents over a self-hosted model.
 
 ---
 
